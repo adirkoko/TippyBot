@@ -1,0 +1,43 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+
+# TS / tool caches
+*.tsbuildinfo
+.cache/
+.nyc_output/
+coverage/
+
+# Logs
+logs/
+*.log
+debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Environment / secrets
+.env
+.env.*
+*.local
+
+# Mineflayer / Minecraft auth
+auth_cache/
+profiles/
+session/
+*.token
+*.key
+*.pem
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+
+config/config.json
+
