@@ -8,6 +8,7 @@ import type { IBotContext } from '../interfaces/bot-context'
 import { consoleLogger } from '../utils/logger'
 import { ActionRegistry } from './actions'
 import { CommandRegistry } from './commands'
+import { PathfinderLock } from './pathfinder-lock'
 import { modules } from '../modules/index'
 import type { IModule } from '../interfaces/module'
 
@@ -32,13 +33,15 @@ export async function startBot(config: IBotConfig) {
 
   const actions = new ActionRegistry()
   const commands = new CommandRegistry()
+  const pathfinderLock = new PathfinderLock()
 
   const ctx: IBotContext = {
     bot,
     config,
     logger: consoleLogger,
     actions,
-    commands
+    commands,
+    pathfinderLock
   }
 
   bot.once('login', () => {

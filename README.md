@@ -1,97 +1,50 @@
 # TippyBot Framework
 
-TippyBot is a modular framework for building Minecraft bots on top of mineflayer. It is designed for developers who want a clean, extensible, and maintainable architecture.
+TippyBot is a modular framework for building Minecraft bots on top of [mineflayer](https://github.com/PrismarineJS/mineflayer). Instead of one monolithic bot script, behavior is composed from small, self-contained modules — each registering its own chat commands and reusable actions.
 
-## Principles
+For a deeper look at how it's put together, see the docs:
 
-* Clear separation of concerns
-* Type-safe module development (TypeScript)
-* Reusable actions and commands
-* Simple extensibility
+* [docs/architecture.md](docs/architecture.md) — core structure, how the bot boots, and how modules coordinate
+* [docs/modules.md](docs/modules.md) — built-in modules and how to write your own
+* [docs/configuration.md](docs/configuration.md) — environment variables, auth modes, and chat signing
+* [docs/testing.md](docs/testing.md) — running and writing tests
 
-## Purpose
-
-* Not a single-purpose bot
-* Features added as modules
-* Complex behavior built from simple components
-* Adaptable to different servers and playstyles
-
-## High-Level Structure
-
-* **core** – bot creation, lifecycle management, action and command registries
-* **interfaces** – framework contracts for modules, actions, and commands
-* **modules** – self-contained feature plugins
-* **utils** – shared helper functions
-* **config** – server and account configuration
-
-## Included Modules
-
-* `chat-basic` – basic test commands
-* `navigation` – movement and navigation
-* `sign-trapdoor` – sign and trapdoor interaction (`!s`)
-* `seq` – action sequence execution
-
-## Running the Bot
-
-### Requirements
+## Requirements
 
 * Node.js 18+
-* Compatible Minecraft server
+* A Minecraft server to connect to
 
-### Installation and Startup
+## Install and run
 
-1. Install dependencies:
 ```bash
 npm install
+cp .env.example .env   # Windows PowerShell: copy .env.example .env
 ```
 
-2. Configure your environment (see [Configuration](#configuration-env) below)
+Edit `.env` with your server and account details, then:
 
-3. Start the bot:
 ```bash
 npm run dev
 ```
 
-### Configuration (.env)
-
-This project uses environment variables for server/account settings.
-
-1. Copy the example file:
-   ```bash
-   cp .env.example .env
-   ```
-
-   (On Windows PowerShell:)
-   ```powershell
-   copy .env.example .env
-   ```
-
-2. Edit `.env` and set your values (host, port, username, auth, etc.).
-
-### Successful connection output
+A successful connection logs:
 
 ```
 TippyBot joined the server
 ```
 
-## In-Game Usage
+## Basic usage
 
-Interact via chat commands, for example:
+Once connected, interact with the bot via in-game chat:
 
-* `!jump`
-* `!come`
-* `!seq jump | wait 500 | jump`
+```
+!ping
+!jump
+!come
+```
 
-## Signed Chat
-
-Chat signing is disabled by default (`chatSigning: false`) to avoid issues in Minecraft 1.19+. Bot messages may appear as unverified.
-
-## Extending the Framework
-
-* Create a module under `src/modules`
-* Implement `IModule`
-* Register actions and commands in `init`
+See [docs/modules.md](docs/modules.md) for the full command reference.
 
 ## License
 
-MIT
+Apache License 2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE).

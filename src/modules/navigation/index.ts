@@ -7,6 +7,7 @@ import type { ICommand } from '../../interfaces/command'
 import { Movements, goals } from 'mineflayer-pathfinder'
 import { createChatThrottler, createCommandCooldownManager } from '../../utils/chat'
 import { distanceSquared } from '../../utils/navigation'
+import { reportError } from '../../utils/errors'
 
 /** Regular expression to validate English player names */
 const EN_PLAYER_NAME_REGEX = /^[A-Za-z0-9_]+$/
@@ -32,12 +33,6 @@ type ActiveNavigation = {
   timeoutHandle?: ReturnType<typeof setTimeout>
 }
 
-/** Internal type representing who currently "owns" navigation */
-type NavigationOwner = {
-  id: string
-  since: number
-}
-
 const navigationModule: IModule = {
   id: 'navigation',
   description: 'Basic navigation: come, jump',
@@ -51,40 +46,6 @@ const navigationModule: IModule = {
 
     const chatThrottled = createChatThrottler(bot)
     const checkCommandCooldown = createCommandCooldownManager()
-
-    /**
-     * Gets the current navigation owner.
-     * @returns The current NavigationOwner or undefined if none
-     */
-    function getNavOwner(): NavigationOwner | undefined {
-      return (bot as any)._navOwner as NavigationOwner | undefined
-    }
-
-
-    /**
-     * Acquires the pathfinder for navigation if not owned by another module.
-     * @param ownerId The ID of the requesting owner
-     * @returns True if the pathfinder was successfully acquired, false otherwise
-     */
-    function acquirePathfinder(ownerId: string): boolean {
-      const owner = getNavOwner()
-      if (owner && owner.id !== ownerId) return false
-        ; (bot as any)._navOwner = { id: ownerId, since: Date.now() } as NavigationOwner
-      return true
-    }
-
-
-    /**
-     * Releases the pathfinder if owned by the given owner ID.
-     * @param ownerId The ID of the owner releasing the pathfinder
-     */
-    function releasePathfinder(ownerId: string) {
-      const owner = getNavOwner()
-      if (owner && owner.id === ownerId) {
-        ; (bot as any)._navOwner = undefined
-      }
-    }
-
 
     /**
      * Clears the active navigation state.
@@ -101,7 +62,7 @@ const navigationModule: IModule = {
       logger.info(`navigation finished (reason=${reason}, target=${activeNav.targetName})`)
 
       activeNav = null
-      releasePathfinder(NAVIGATION_OWNER_ID)
+      ctx.pathfinderLock.release(NAVIGATION_OWNER_ID)
     }
 
 
@@ -171,7 +132,7 @@ const navigationModule: IModule = {
       if (activeNav) {
         logger.error('bot disconnected during active navigation')
         activeNav = null
-        releasePathfinder(NAVIGATION_OWNER_ID)
+        ctx.pathfinderLock.release(NAVIGATION_OWNER_ID)
       }
     })
 
@@ -241,8 +202,8 @@ const navigationModule: IModule = {
             return
           }
 
-          if (!acquirePathfinder(NAVIGATION_OWNER_ID)) {
-            logger.info(`navigation blocked by owner=${getNavOwner()?.id}`)
+          if (!ctx.pathfinderLock.acquire(NAVIGATION_OWNER_ID)) {
+            logger.info(`navigation blocked by owner=${ctx.pathfinderLock.getOwner()?.id}`)
             ctx.bot.chat("Someone else is steering me right now.")
 
             return
@@ -253,7 +214,7 @@ const navigationModule: IModule = {
             logger.info(`player not found: ${targetName}`)
             ctx.bot.chat("Can't find that player.")
 
-            releasePathfinder(NAVIGATION_OWNER_ID)
+            ctx.pathfinderLock.release(NAVIGATION_OWNER_ID)
             return
           }
 
@@ -261,7 +222,7 @@ const navigationModule: IModule = {
             logger.info(`player entity missing: ${targetName}`)
             ctx.bot.chat("I can't see them right now.")
 
-            releasePathfinder(NAVIGATION_OWNER_ID)
+            ctx.pathfinderLock.release(NAVIGATION_OWNER_ID)
             return
           }
 
@@ -274,7 +235,7 @@ const navigationModule: IModule = {
             logger.info(`target too far (target=${targetName}, distance=${Math.round(distance)})`)
             ctx.bot.chat("Too far for me.")
 
-            releasePathfinder(NAVIGATION_OWNER_ID)
+            ctx.pathfinderLock.release(NAVIGATION_OWNER_ID)
             return
           }
 
@@ -301,9 +262,7 @@ const navigationModule: IModule = {
           ctx.bot.chat("On my way!")
 
         } catch (err) {
-          logger.error(`come action failed: ${err}`)
-          ctx.bot.chat("Something went wrong.")
-
+          reportError(ctx, 'come action', err)
           clearActiveNav('error')
         }
       }
@@ -322,9 +281,7 @@ const navigationModule: IModule = {
           if (!checkCommandCooldown(username, COMMAND_COOLDOWN_MS)) return
           await ctx.actions.run('jump', ctx, [])
         } catch (err) {
-          logger.error(`jump action failed: ${err}`)
-          ctx.bot.chat("Something went wrong.")
-
+          reportError(ctx, 'jump command', err)
         }
       }
     }
@@ -352,10 +309,8 @@ const navigationModule: IModule = {
 
           await ctx.actions.run('come', ctx, [targetName])
         } catch (err) {
-          logger.error(`come command failed: ${err}`)
-          ctx.bot.chat("Something went wrong.")
+          reportError(ctx, 'come command', err)
         }
-
       }
     }
 

@@ -7,8 +7,12 @@ import type { ICommand } from '../../interfaces/command'
 import type { IBotContext } from '../../interfaces/bot-context'
 import { getSignLinesFromWorldState } from '../../utils/signWorld'
 import { waitForGoalReached, isWithinDistance } from '../../utils/navigation'
+import { reportError } from '../../utils/errors'
 
 const GoalNear = (goals as any).GoalNear
+
+/** Identifier used when this module "owns" the pathfinder */
+const SIGN_TRAPDOOR_OWNER_ID = 'sign-trapdoor:s'
 
 /**
  * Triggers the trapdoor located directly beneath a sign containing the specified label.
@@ -75,6 +79,12 @@ async function triggerTrapdoorForLabel(
     return
   }
 
+  if (!ctx.pathfinderLock.acquire(SIGN_TRAPDOOR_OWNER_ID)) {
+    logger.info(`SignTrapdoor: navigation blocked by owner=${ctx.pathfinderLock.getOwner()?.id}`)
+    bot.chat(`Someone else is steering me right now.`)
+    return
+  }
+
   logger.info(`SignTrapdoor: Navigating to trapdoor at ${foundTrapdoor.position} (label="${label}").`)
   bot.chat(`On my way.`)
 
@@ -89,9 +99,10 @@ async function triggerTrapdoorForLabel(
   try {
     await waitForGoalReached(ctx, 15000)
   } catch (err) {
-    logger.error(`SignTrapdoor: Failed to reach trapdoor at ${foundTrapdoor.position}.`, { error: err })
-    bot.chat(`Couldn't reach it.`)
+    reportError(ctx, `SignTrapdoor: reach trapdoor at ${foundTrapdoor.position}`, err, "Couldn't reach it.")
     return
+  } finally {
+    ctx.pathfinderLock.release(SIGN_TRAPDOOR_OWNER_ID)
   }
 
   // Check distance
@@ -157,8 +168,7 @@ const signTrapdoorModule: IModule = {
         }
 
         await triggerTrapdoorForLabel(ctx, label, username).catch((err) => {
-          logger.error(`SignTrapdoor: Error executing !s command for username="${username}".`, { error: err })
-          ctx.bot.chat(`Something went wrong.`)
+          reportError(ctx, `SignTrapdoor: !s command for username="${username}"`, err)
         })
       }
     }
