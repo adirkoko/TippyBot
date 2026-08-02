@@ -159,6 +159,7 @@ const signTrapdoorModule: IModule = {
       description:
         'Search a sign containing the username of the caller, toggle its trapdoor twice, and send a private message',
       usage: '!s',
+      requiredLevel: 'member',
       async execute({ ctx, username }) {
         const label = username
         if (!label) {

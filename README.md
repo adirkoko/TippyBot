@@ -6,6 +6,8 @@ For a deeper look at how it's put together, see the docs:
 
 * [docs/architecture.md](docs/architecture.md) — core structure, how the bot boots, and how modules coordinate
 * [docs/modules.md](docs/modules.md) — built-in modules and how to write your own
+* [docs/commands.md](docs/commands.md) — the full command reference: syntax, permission level, arguments, limits, examples
+* [docs/permissions.md](docs/permissions.md) — permission levels, Admin config, and custom access groups
 * [docs/configuration.md](docs/configuration.md) — environment variables, auth modes, and chat signing
 * [docs/testing.md](docs/testing.md) — running and writing tests
 
@@ -43,7 +45,7 @@ Once connected, interact with the bot via in-game chat:
 !come
 ```
 
-See [docs/modules.md](docs/modules.md) for the full command reference.
+See [docs/commands.md](docs/commands.md) for the full command reference.
 
 ## License
 

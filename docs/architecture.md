@@ -4,7 +4,7 @@
 
 | Path | Responsibility |
 |---|---|
-| `src/core` | Bot creation and lifecycle, the action/command registries, the pathfinder lock |
+| `src/core` | Bot creation and lifecycle, the action/command registries, the pathfinder lock, the permission service |
 | `src/interfaces` | TypeScript contracts shared across the framework (`IModule`, `IAction`, `ICommand`, `IBotContext`, ...) |
 | `src/modules` | Self-contained feature plugins (see [modules.md](modules.md)) |
 | `src/utils` | Small, stateless helper functions used by modules |
@@ -13,10 +13,11 @@
 ## Boot flow
 
 1. `src/index.ts` loads `.env` (via `dotenv/config`) and calls `startBot(botConfig)`.
-2. `startBot` ([src/core/bot.ts](../src/core/bot.ts)) creates the mineflayer `bot`, loads the `pathfinder` plugin, and constructs the shared services: `ActionRegistry`, `CommandRegistry`, `PathfinderLock`.
-3. Those pieces are bundled into a single `IBotContext` (`ctx`) — this is the one object threaded through the entire framework. Every module, action, and command receives it.
-4. `startBot` wires `bot.on('chat', ...)` to `commands.handleChatMessage`, then calls `init(ctx)` on every module listed in [src/modules/index.ts](../src/modules/index.ts).
-5. Each module registers its actions and commands against `ctx.actions` / `ctx.commands` during `init`. From then on, the registries — not the modules themselves — own how a chat message turns into behavior.
+2. `startBot` ([src/core/bot.ts](../src/core/bot.ts)) creates the mineflayer `bot`, loads the `pathfinder` plugin, and constructs the shared services: `ActionRegistry`, `CommandRegistry`, `PathfinderLock`, `PermissionService`.
+3. `PermissionService.load()` is awaited before anything else touches chat, so dynamic permission data (Operators, Members, blacklist, groups) is ready before the first message can arrive.
+4. Those pieces are bundled into a single `IBotContext` (`ctx`) — this is the one object threaded through the entire framework. Every module, action, and command receives it.
+5. `startBot` wires `bot.on('chat', ...)` to `commands.handleChatMessage`, then calls `init(ctx)` on every module listed in [src/modules/index.ts](../src/modules/index.ts).
+6. Each module registers its actions and commands against `ctx.actions` / `ctx.commands` during `init`. From then on, the registries — not the modules themselves — own how a chat message turns into behavior.
 
 ## `IBotContext`
 
@@ -28,6 +29,7 @@ interface IBotContext {
   actions: IActionRegistry
   commands: ICommandRegistry
   pathfinderLock: IPathfinderLock
+  permissions: IPermissionService
 }
 ```
 
@@ -39,6 +41,12 @@ Nothing in `src/modules` reaches for globals or singletons — everything a modu
 * **Commands** (`ICommand`, registered via `ctx.commands`) are the chat-facing entry points — `!jump`, `!come`. A command's `execute` typically validates/parses chat input (cooldowns, argument parsing) and then calls into one or more actions via `ctx.actions.run(...)`.
 
 This split exists so behavior can be triggered from more than one place — chat commands, action sequences (`ActionRegistry.runSequence`), or future triggers (e.g. scheduled tasks) — without duplicating logic.
+
+Every `ICommand` must declare a `requiredLevel` — see [Permissions](#permissions) below.
+
+## Permissions
+
+Every command is gated by a single central check before it runs, done in `CommandRegistry.handleChatMessage` via `ctx.permissions.canUseCommand(username, command)`. Modules never implement their own permission checks; they only declare `requiredLevel` on each command they register. See [permissions.md](permissions.md) for the full model (levels, Admin config, custom groups, the `!access` commands, and storage).
 
 ## Coordinating the pathfinder: `PathfinderLock`
 

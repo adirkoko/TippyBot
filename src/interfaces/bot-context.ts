@@ -5,6 +5,7 @@ import type { ILogger } from './logger'
 import type { IActionRegistry } from './action'
 import type { ICommandRegistry } from './command'
 import type { IPathfinderLock } from './pathfinder-lock'
+import type { IPermissionService } from './permissions'
 
 export interface IBotContext {
   bot: Bot
@@ -14,4 +15,5 @@ export interface IBotContext {
   actions: IActionRegistry
   commands: ICommandRegistry
   pathfinderLock: IPathfinderLock
+  permissions: IPermissionService
 }

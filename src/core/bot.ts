@@ -9,8 +9,12 @@ import { consoleLogger } from '../utils/logger'
 import { ActionRegistry } from './actions'
 import { CommandRegistry } from './commands'
 import { PathfinderLock } from './pathfinder-lock'
+import { PermissionService } from './permission-service'
+import { JsonPermissionStore } from './permission-store'
 import { modules } from '../modules/index'
 import type { IModule } from '../interfaces/module'
+
+const PERMISSIONS_FILE_PATH = './data/permissions.json'
 
 export async function startBot(config: IBotConfig) {
   const bot = mineflayer.createBot({
@@ -34,6 +38,9 @@ export async function startBot(config: IBotConfig) {
   const actions = new ActionRegistry()
   const commands = new CommandRegistry()
   const pathfinderLock = new PathfinderLock()
+  const permissionStore = new JsonPermissionStore(PERMISSIONS_FILE_PATH)
+  const permissions = new PermissionService(config.admins, permissionStore, consoleLogger)
+  await permissions.load()
 
   const ctx: IBotContext = {
     bot,
@@ -41,7 +48,8 @@ export async function startBot(config: IBotConfig) {
     logger: consoleLogger,
     actions,
     commands,
-    pathfinderLock
+    pathfinderLock,
+    permissions
   }
 
   bot.once('login', () => {

@@ -3,18 +3,21 @@ import { CommandRegistry } from '../../src/core/commands'
 import type { ICommand } from '../../src/interfaces/command'
 import type { IBotContext } from '../../src/interfaces/bot-context'
 import { createFakeLogger } from '../helpers/fakeLogger'
+import { createAllowAllPermissions } from '../helpers/fakePermissions'
 
 function makeCtx(prefix = '!'): IBotContext {
   return {
     config: { commandPrefix: prefix },
-    logger: createFakeLogger()
+    logger: createFakeLogger(),
+    bot: { chat: vi.fn() },
+    permissions: createAllowAllPermissions()
   } as unknown as IBotContext
 }
 
 describe('CommandRegistry', () => {
   it('registers a command under its name and aliases, case-insensitively', () => {
     const registry = new CommandRegistry()
-    const command: ICommand = { name: 'Come', aliases: ['C'], execute: vi.fn() }
+    const command: ICommand = { name: 'Come', aliases: ['C'], requiredLevel: 'user', execute: vi.fn() }
 
     registry.register(command)
 
@@ -26,7 +29,7 @@ describe('CommandRegistry', () => {
   it('ignores messages that do not start with the configured prefix', async () => {
     const registry = new CommandRegistry()
     const execute = vi.fn()
-    registry.register({ name: 'ping', execute })
+    registry.register({ name: 'ping', requiredLevel: 'user', execute })
 
     const ctx = makeCtx()
     await registry.handleChatMessage('alice', 'ping', ctx)
@@ -37,7 +40,7 @@ describe('CommandRegistry', () => {
   it('parses the command name and args after the prefix and executes it', async () => {
     const registry = new CommandRegistry()
     const execute = vi.fn().mockResolvedValue(undefined)
-    registry.register({ name: 'come', execute })
+    registry.register({ name: 'come', requiredLevel: 'user', execute })
 
     const ctx = makeCtx()
     await registry.handleChatMessage('alice', '!come bob', ctx)
@@ -61,11 +64,56 @@ describe('CommandRegistry', () => {
   it('ignores an empty message consisting only of the prefix', async () => {
     const registry = new CommandRegistry()
     const execute = vi.fn()
-    registry.register({ name: 'ping', execute })
+    registry.register({ name: 'ping', requiredLevel: 'user', execute })
 
     const ctx = makeCtx()
     await registry.handleChatMessage('alice', '!', ctx)
 
     expect(execute).not.toHaveBeenCalled()
+  })
+
+  describe('permission gate', () => {
+    it('does not execute and replies with a denial message when canUseCommand returns false', async () => {
+      const registry = new CommandRegistry()
+      const execute = vi.fn()
+      registry.register({ name: 'grant', requiredLevel: 'admin', execute })
+
+      const ctx = makeCtx()
+      ;(ctx.permissions.canUseCommand as any).mockReturnValue(false)
+      ;(ctx.permissions.isBlacklisted as any).mockReturnValue(false)
+
+      await registry.handleChatMessage('alice', '!grant', ctx)
+
+      expect(execute).not.toHaveBeenCalled()
+      expect(ctx.bot.chat).toHaveBeenCalledWith('You need Admin permission or higher to use this command.')
+    })
+
+    it('executes when canUseCommand returns true', async () => {
+      const registry = new CommandRegistry()
+      const execute = vi.fn().mockResolvedValue(undefined)
+      registry.register({ name: 'ping', requiredLevel: 'user', execute })
+
+      const ctx = makeCtx()
+      ;(ctx.permissions.canUseCommand as any).mockReturnValue(true)
+
+      await registry.handleChatMessage('alice', '!ping', ctx)
+
+      expect(execute).toHaveBeenCalled()
+    })
+
+    it('gives a distinct message for a blacklisted player', async () => {
+      const registry = new CommandRegistry()
+      const execute = vi.fn()
+      registry.register({ name: 'ping', requiredLevel: 'user', execute })
+
+      const ctx = makeCtx()
+      ;(ctx.permissions.canUseCommand as any).mockReturnValue(false)
+      ;(ctx.permissions.isBlacklisted as any).mockReturnValue(true)
+
+      await registry.handleChatMessage('alice', '!ping', ctx)
+
+      expect(execute).not.toHaveBeenCalled()
+      expect(ctx.bot.chat).toHaveBeenCalledWith("You're not allowed to use any commands.")
+    })
   })
 })

@@ -8,4 +8,7 @@ export interface IBotConfig {
   profilesFolder?: string
 
   commandPrefix: string // Prefix for bot commands in chat, e.g., "!"
+
+  /** Normalized (lowercase) usernames with permanent Admin access; source of truth is .env, never mutated at runtime. */
+  admins: string[]
 }

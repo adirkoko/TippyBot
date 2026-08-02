@@ -1,5 +1,6 @@
 // src/interfaces/command.ts
 import type { IBotContext } from './bot-context'
+import type { PermissionLevel } from './permissions'
 
 export interface ICommandContext {
   ctx: IBotContext
@@ -13,6 +14,8 @@ export interface ICommand {
   aliases?: string[]
   description?: string
   usage?: string
+  /** Minimum permission level required to run this command; checked centrally before execute() is called. */
+  requiredLevel: PermissionLevel
 
   execute(commandCtx: ICommandContext): Promise<void>
 }

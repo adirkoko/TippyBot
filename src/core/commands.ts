@@ -34,6 +34,17 @@ export class CommandRegistry implements ICommandRegistry {
       return
     }
 
+    if (!ctx.permissions.canUseCommand(username, command)) {
+      ctx.logger.info(
+        `command denied (user=${username}, command=${command.name}, requiredLevel=${command.requiredLevel})`
+      )
+      const denialMessage = ctx.permissions.isBlacklisted(username)
+        ? "You're not allowed to use any commands."
+        : `You need ${capitalize(command.requiredLevel)} permission or higher to use this command.`
+      ctx.bot.chat(denialMessage)
+      return
+    }
+
     const commandCtx: ICommandContext = {
       ctx,
       username,
@@ -43,4 +54,8 @@ export class CommandRegistry implements ICommandRegistry {
 
     await command.execute(commandCtx)
   }
+}
+
+function capitalize(s: string): string {
+  return s.charAt(0).toUpperCase() + s.slice(1)
 }

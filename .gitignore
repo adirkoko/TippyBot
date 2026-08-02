@@ -32,6 +32,9 @@ session/
 *.key
 *.pem
 
+# Dynamic runtime data (permissions store, etc.)
+data/
+
 # OS / Editor
 .DS_Store
 Thumbs.db

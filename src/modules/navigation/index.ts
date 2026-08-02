@@ -8,9 +8,7 @@ import { Movements, goals } from 'mineflayer-pathfinder'
 import { createChatThrottler, createCommandCooldownManager } from '../../utils/chat'
 import { distanceSquared } from '../../utils/navigation'
 import { reportError } from '../../utils/errors'
-
-/** Regular expression to validate English player names */
-const EN_PLAYER_NAME_REGEX = /^[A-Za-z0-9_]+$/
+import { isValidPlayerName } from '../../utils/validation'
 
 /** Maximum distance (in blocks) that the bot will agree to walk for !come */
 const MAX_COME_DISTANCE = 256
@@ -170,7 +168,7 @@ const navigationModule: IModule = {
             return
           }
 
-          if (!EN_PLAYER_NAME_REGEX.test(targetName)) {
+          if (!isValidPlayerName(targetName)) {
             logger.info(`invalid player name: ${targetName}`)
             ctx.bot.chat("That name doesn't look right.")
 
@@ -276,6 +274,7 @@ const navigationModule: IModule = {
       name: 'jump',
       description: 'Make the bot jump once',
       usage: '!jump',
+      requiredLevel: 'user',
       async execute({ ctx, username }) {
         try {
           if (!checkCommandCooldown(username, COMMAND_COOLDOWN_MS)) return
@@ -294,6 +293,7 @@ const navigationModule: IModule = {
       name: 'come',
       description: 'Make the bot come to you or to a given player',
       usage: '!come [playerName]',
+      requiredLevel: 'member',
       async execute({ ctx, username, args }) {
         try {
           if (!checkCommandCooldown(username, COMMAND_COOLDOWN_MS)) return
