@@ -1,0 +1,22 @@
+{
+  "instances": [
+    {
+      "id": "steve",
+      "host": "your.server.address",
+      "port": 25565,
+      "username": "SteveBot",
+      "auth": "microsoft",
+      "commandPrefix": "!",
+      "admins": ["PlayerOne"]
+    },
+    {
+      "id": "alex",
+      "host": "your.other.server.address",
+      "port": 25565,
+      "username": "AlexBot",
+      "auth": "offline",
+      "commandPrefix": "!",
+      "admins": ["PlayerTwo"]
+    }
+  ]
+}

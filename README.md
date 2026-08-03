@@ -5,11 +5,12 @@ TippyBot is a modular framework for building Minecraft bots on top of [mineflaye
 For a deeper look at how it's put together, see the docs:
 
 * [docs/architecture.md](docs/architecture.md) — core structure, how the bot boots, and how modules coordinate
+* [docs/multi-instance.md](docs/multi-instance.md) — running several independent bots from one process
 * [docs/modules.md](docs/modules.md) — built-in modules and how to write your own
 * [docs/commands.md](docs/commands.md) — the full command reference: syntax, permission level, arguments, limits, examples
 * [docs/permissions.md](docs/permissions.md) — permission levels, Admin config, and custom access groups
 * [docs/tasks.md](docs/tasks.md) — the active-task model, `!status`/`!cancel`, and reconnect/disconnect handling
-* [docs/configuration.md](docs/configuration.md) — environment variables, auth modes, and chat signing
+* [docs/configuration.md](docs/configuration.md) — the instance config file, auth modes, and chat signing
 * [docs/testing.md](docs/testing.md) — running and writing tests
 
 ## Requirements
@@ -21,10 +22,10 @@ For a deeper look at how it's put together, see the docs:
 
 ```bash
 npm install
-cp .env.example .env   # Windows PowerShell: copy .env.example .env
+cp bots.config.example.json bots.config.json
 ```
 
-Edit `.env` with your server and account details, then:
+Edit `bots.config.json` with your server and account details (one or more bot instances — see [docs/configuration.md](docs/configuration.md)), then:
 
 ```bash
 npm run dev
@@ -33,7 +34,7 @@ npm run dev
 A successful connection logs:
 
 ```
-TippyBot joined the server
+[steve] [INFO] TippyBot joined the server
 ```
 
 ## Basic usage

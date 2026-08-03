@@ -8,24 +8,27 @@
 | `src/interfaces` | TypeScript contracts shared across the framework (`IModule`, `IAction`, `ICommand`, `IBotContext`, ...) |
 | `src/modules` | Self-contained feature plugins (see [modules.md](modules.md)) |
 | `src/utils` | Small, stateless helper functions used by modules |
-| `src/config` | Reads `.env` into a typed `IBotConfig` |
+| `src/config` | Loads and validates `bots.config.json` into one typed `IBotConfig` per instance |
 
 ## Boot flow
 
-1. `src/index.ts` loads `.env` (via `dotenv/config`) and calls `startBot(botConfig)`.
-2. `startBot` ([src/core/bot.ts](../src/core/bot.ts)) constructs the services shared across the bot's entire lifetime — `ActionRegistry`, `CommandRegistry`, `PathfinderLock`, `PermissionService`, `TaskManager`, `CooldownService` — and awaits `PermissionService.load()` before anything else touches chat.
-3. It then calls an internal `connect()` function that creates the mineflayer `bot`, loads the `pathfinder` plugin, and bundles everything into a single `IBotContext` (`ctx`) — the one object threaded through the entire framework.
-4. `connect()` wires `bot.on('chat', ...)` to `commands.handleChatMessage`, wires `end`/`death` to `ctx.tasks.abort(...)` (see [tasks.md](tasks.md)), then calls `init(ctx)` on every module listed in [src/modules/index.ts](../src/modules/index.ts).
-5. Each module registers its actions and commands against `ctx.actions` / `ctx.commands` during `init`. From then on, the registries — not the modules themselves — own how a chat message turns into behavior.
-6. If the connection drops, `connect()` runs again on a backoff schedule — see [tasks.md](tasks.md#reconnection). `bot` (and therefore `ctx`) is recreated per connection attempt; the services from step 2 persist across reconnects.
+TippyBot can run multiple independent bot instances from one process, coordinated by `BotManager` — see [multi-instance.md](multi-instance.md) for the full picture. The flow below is per-instance; `BotManager.startAll()` runs it once for every instance in `bots.config.json`.
+
+1. `src/index.ts` loads `.env` (via `dotenv/config`), calls `loadBotInstances()` ([src/config/instances.ts](../src/config/instances.ts)) to get one `IBotConfig` per configured instance, constructs a `BotManager` ([src/core/bot-manager.ts](../src/core/bot-manager.ts)) with them, and calls `manager.startAll()`.
+2. `BotManager.startAll()` calls `startBot(config)` for every instance and keeps the returned `IBotInstanceHandle` in a map keyed by `id` — this map is the API surface a future control layer (e.g. a web admin panel) would read from instead of knowing about individual instances.
+3. `startBot` ([src/core/bot.ts](../src/core/bot.ts)) returns that handle immediately and continues setup in the background: it constructs the services scoped to that instance's entire lifetime — `ActionRegistry`, `CommandRegistry`, `PathfinderLock`, `PermissionService`, `TaskManager`, `CooldownService`, `HomeService` — and awaits `PermissionService.load()` / `HomeService.load()` before anything else touches chat. All of this is local to that one call, so nothing is shared between instances. If this setup throws (e.g. a corrupt permissions file on disk), it's caught here and surfaced as an `'errored'` status on the handle rather than crashing the process.
+4. It then calls an internal `connect()` function that creates the mineflayer `bot`, loads the `pathfinder` plugin, and bundles everything into a single `IBotContext` (`ctx`) — the one object threaded through the entire framework. `ctx` itself is kept internal to `bot.ts`; the handle's `getSnapshot()` starts reflecting live values (ping, health, food, position, dimension, active task) pulled from it once the instance is `'online'` — see [multi-instance.md](multi-instance.md#botinstancehandle-one-api-surface-for-every-instance).
+5. `connect()` wires `bot.on('chat', ...)` to `commands.handleChatMessage`, wires `end`/`death` to `ctx.tasks.abort(...)` (see [tasks.md](tasks.md)), then calls `init(ctx)` on every module listed in [src/modules/index.ts](../src/modules/index.ts).
+6. Each module registers its actions and commands against `ctx.actions` / `ctx.commands` during `init`. From then on, the registries — not the modules themselves — own how a chat message turns into behavior.
+7. The handle's status moves `'connecting'` → `'online'` on `bot`'s `login` event, and back to `'reconnecting'` on `end`. If the connection drops, `connect()` runs again on a backoff schedule — see [tasks.md](tasks.md#reconnection). `bot` (and therefore `ctx`) is recreated per connection attempt; the services from step 3 persist across reconnects.
 
 ## `IBotContext`
 
 ```ts
 interface IBotContext {
   bot: Bot                       // the mineflayer bot instance
-  config: IBotConfig             // parsed .env values
-  logger: ILogger                // console logger (see src/utils/logger.ts)
+  config: IBotConfig             // this instance's parsed config (includes its unique `id`)
+  logger: ILogger                // console logger tagged with this instance's id (see src/utils/logger.ts)
   actions: IActionRegistry
   commands: ICommandRegistry
   pathfinderLock: IPathfinderLock
@@ -80,7 +83,7 @@ Any module that calls `bot.pathfinder.setGoal(...)` should acquire the lock firs
 
 ## Homes
 
-`ctx.homes` (`HomeService`, [src/core/home-service.ts](../src/core/home-service.ts)) holds one saved location per player — set via `!sethome`, walked to via `!home` (see [commands.md](commands.md)). It follows the exact same storage-behind-an-interface pattern as `PermissionService`: `IHomeStore` ([src/interfaces/home-store.ts](../src/interfaces/home-store.ts)) hides the on-disk format, and `JsonHomeStore` ([src/core/home-store.ts](../src/core/home-store.ts)) is the only implementation today, persisting to `data/homes.json`.
+`ctx.homes` (`HomeService`, [src/core/home-service.ts](../src/core/home-service.ts)) holds one saved location per player — set via `!sethome`, walked to via `!home` (see [commands.md](commands.md)). It follows the exact same storage-behind-an-interface pattern as `PermissionService`: `IHomeStore` ([src/interfaces/home-store.ts](../src/interfaces/home-store.ts)) hides the on-disk format, and `JsonHomeStore` ([src/core/home-store.ts](../src/core/home-store.ts)) is the only implementation today, persisting to `data/<id>/homes.json` (namespaced per instance — see [multi-instance.md](multi-instance.md)).
 
 Both `JsonPermissionStore` and `JsonHomeStore` are now thin wrappers around a shared pair of primitives in [src/core/json-file-store.ts](../src/core/json-file-store.ts) — `readJsonFile` (parse-or-fallback) and `writeJsonFileAtomic` (temp-file-then-rename, same crash-safety guarantee as before). A third JSON-backed store can reuse these instead of re-implementing atomic writes.
 

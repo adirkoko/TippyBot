@@ -22,7 +22,11 @@ yarn-error.log*
 # Environment / secrets
 .env
 .env.*
+!.env.example
 *.local
+
+# Per-deployment bot instance config (copy from bots.config.example.json)
+bots.config.json
 
 # Mineflayer / Minecraft auth
 auth_cache/

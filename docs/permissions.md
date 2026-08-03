@@ -8,7 +8,7 @@ Four fixed levels, highest to lowest:
 
 | Level | Who | Granted via |
 |---|---|---|
-| `Admin` | Full access to everything | `BOT_ADMINS` in `.env` only |
+| `Admin` | Full access to everything | `admins` in `bots.config.json` only |
 | `Operator` | Manages Members, blacklist, and groups | `!access grant <player> operator` (Admin only) |
 | `Member` | Regular trusted player | `!access grant <player> member` (Admin or Operator) |
 | `User` | Anyone not blacklisted | Default — no action needed |
@@ -17,7 +17,7 @@ Higher levels automatically inherit everything a lower level can do (`Admin` →
 
 ### Admins are config-only
 
-Admins are read once from `BOT_ADMINS` at startup (see [configuration.md](configuration.md)) and are never persisted, never mutable via chat, and cannot be targeted by any `!access` mutation (`grant`, `revoke`, member/blacklist add-remove, etc. all refuse a target that resolves to Admin). Changing who's an Admin means editing `.env` and restarting the bot — there is no in-game path to it, by design.
+Admins are read once from that instance's `admins` list in `bots.config.json` at startup (see [configuration.md](configuration.md)) and are never persisted, never mutable via chat, and cannot be targeted by any `!access` mutation (`grant`, `revoke`, member/blacklist add-remove, etc. all refuse a target that resolves to Admin). Changing who's an Admin means editing `bots.config.json` and restarting the bot — there is no in-game path to it, by design.
 
 ## Custom groups
 
@@ -56,7 +56,7 @@ An `Operator` can manage `Member`s, the blacklist, and groups — but never anot
 
 ## Storage
 
-Everything except Admins is dynamic and persisted to `data/permissions.json` (gitignored, like `auth_cache/`):
+Everything except Admins is dynamic and persisted to `data/<id>/permissions.json` (gitignored, like `auth_cache/`, and namespaced per instance — see [multi-instance.md](multi-instance.md)):
 
 * Operators
 * Members

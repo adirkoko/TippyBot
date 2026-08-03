@@ -2,24 +2,22 @@
 import { isValidPlayerName, normalizeUsername } from '../utils/validation'
 
 /**
- * Parses BOT_ADMINS into a deduped list of normalized usernames.
+ * Validates and normalizes a raw list of admin usernames (deduped, case-insensitive).
  *
  * Throws on an invalid entry rather than silently dropping it: a typo'd
  * Admin name is a security-relevant misconfiguration, not something to
  * paper over at startup.
  */
-export function parseAdminList(raw: string | undefined): string[] {
-  if (!raw) return []
-
+export function normalizeAdminList(rawNames: string[]): string[] {
   const admins: string[] = []
   const seen = new Set<string>()
 
-  for (const entry of raw.split(',')) {
+  for (const entry of rawNames) {
     const trimmed = entry.trim()
     if (!trimmed) continue
 
     if (!isValidPlayerName(trimmed)) {
-      throw new Error(`BOT_ADMINS contains an invalid Minecraft username: "${trimmed}"`)
+      throw new Error(`Invalid Minecraft username in admins list: "${trimmed}"`)
     }
 
     const normalized = normalizeUsername(trimmed)
