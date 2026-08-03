@@ -42,6 +42,10 @@ Basic operational commands: `!where`, `!look`, `!say`. `!where`/`!look` are simp
 
 Provides `!sethome`/`!home`. Backed by `ctx.homes` (`HomeService`) rather than any state local to the module — see [architecture.md](architecture.md#homes). `!home` doesn't reimplement walking: it validates the saved dimension matches the bot's current one, then calls `ctx.actions.run('goto', ctx, [...])`, reusing `navigation`'s `goto` action directly.
 
+### `inventory`
+
+Provides `!inventory`, `!equip`, `!drop`, `!give`. None of these are tasks — they're single `await`-and-done calls into mineflayer's own inventory API (`bot.inventory.items()`, `bot.equip`, `bot.toss`), with no cancellable multi-step process to track. Item-name resolution is shared, reusable logic in [`src/utils/items.ts`](../src/utils/items.ts) (`resolveItemName`, `countItem`, `summarizeInventory`) rather than being reimplemented per command — reuse it if you add more item-related commands later (`!mine`, when it lands, will need the same "which item/block did they mean" resolution). `resolveItemName` deliberately refuses ambiguous substring matches instead of guessing, per [commands.md](commands.md#inventory--equipment-inventory).
+
 ## Writing a new module
 
 1. Create `src/modules/<name>/index.ts` exporting a default object implementing `IModule`:

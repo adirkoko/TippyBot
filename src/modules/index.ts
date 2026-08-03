@@ -7,6 +7,7 @@ import accessModule from './access/index'
 import botStatusModule from './bot-status/index'
 import botOpsModule from './bot-ops/index'
 import homesModule from './homes/index'
+import inventoryModule from './inventory/index'
 
 export const modules: IModule[] = [
   chatBasicModule,
@@ -16,5 +17,6 @@ export const modules: IModule[] = [
   botStatusModule,
   botOpsModule,
   homesModule,
+  inventoryModule,
   // Add more modules here as needed...
 ]

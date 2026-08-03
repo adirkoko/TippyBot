@@ -26,6 +26,10 @@ Permission levels and how group access works are explained in full in [permissio
 | `!stop` | Immediately stops any active action or task | `Operator` | `bot-status` |
 | `!sethome` | Saves the caller's current position as their home | `Member` | `homes` |
 | `!home` | Walks to the caller's saved home | `Member` | `homes` |
+| `!inventory` | Shows a summary of the bot's inventory | `Member` | `inventory` |
+| `!equip <item>` | Equips a matching item to hand | `Member` | `inventory` |
+| `!drop <item> [amount]` | Drops a quantity of a matching item | `Member` | `inventory` |
+| `!give <player> <item> [amount]` | Gives a quantity of a matching item to a nearby player | `Operator` | `inventory` |
 | `!access me` | Shows your own level and group memberships | `User` | `access` |
 | `!access player <player>` | Shows another player's level | `User` | `access` |
 | `!access grant <player> operator` | Grants Operator | `Admin` | `access` |
@@ -252,6 +256,58 @@ Permission levels and how group access works are explained in full in [permissio
 * **Limits:** Same as `!goto` (256-block range, 30s task timeout), since it's implemented as a `!goto` to the saved coordinates.
 * **Notes:** Replies "You don't have a home set. Use !sethome first." if none is saved. Refuses to walk if the bot is currently in a different dimension than the one the home was saved in, rather than silently attempting (and failing) to cross dimensions.
 * **Module:** `homes`
+
+## Inventory & Equipment (`inventory`)
+
+Item names are resolved via [`resolveItemName`](../src/utils/items.ts): an exact registry name (e.g. `oak_log`) always wins outright; otherwise it falls back to a substring match. If that substring matches more than one item, the command refuses with a message listing the candidates rather than guessing — see each command's notes below. None of these four commands register a task with `ctx.tasks`; they're single, near-instantaneous operations, same as `!where`/`!look`.
+
+#### `!inventory`
+
+* **Syntax:** `!inventory`
+* **Description:** Reports a summary of the bot's inventory, grouped by item.
+* **Minimum role:** `Member`
+* **Group-assignable:** Yes.
+* **Arguments:** None.
+* **Example:** `!inventory` → `Inventory: oak_log x64, cobblestone x32, iron_pickaxe x1`
+* **Limits:** None. Summary is capped at 10 distinct item types, with "...and N more" beyond that (keeps the reply under Minecraft's chat length limit).
+* **Notes:** Reports `Inventory: empty` when there's nothing to show.
+* **Module:** `inventory`
+
+#### `!equip <item>`
+
+* **Syntax:** `!equip <item>`
+* **Description:** Equips a matching item to the bot's hand.
+* **Minimum role:** `Member`
+* **Group-assignable:** Yes.
+* **Arguments:** `item` (required) — an item name or unambiguous substring of one.
+* **Example:** `!equip iron_pickaxe` → `Equipped Iron Pickaxe.`
+* **Limits:** 1s cooldown per player.
+* **Notes:** Always equips to the `hand` slot (no armor-slot detection yet). Replies "I don't have any ..." if the bot isn't carrying it.
+* **Module:** `inventory`
+
+#### `!drop <item> [amount]`
+
+* **Syntax:** `!drop <item> [amount]`
+* **Description:** Drops a quantity of a matching item on the ground.
+* **Minimum role:** `Member`
+* **Group-assignable:** Yes.
+* **Arguments:** `item` (required); `amount` (optional positive integer) — defaults to the bot's entire held quantity of that item if omitted.
+* **Example:** `!drop cobblestone 16` → `Dropped 16x Cobblestone.`
+* **Limits:** 1s cooldown per player · refuses an `amount` greater than what the bot actually holds ("I only have N ...").
+* **Notes:** None.
+* **Module:** `inventory`
+
+#### `!give <player> <item> [amount]`
+
+* **Syntax:** `!give <player> <item> [amount]`
+* **Description:** Drops a quantity of a matching item near a nearby player.
+* **Minimum role:** `Operator` (first-stage restriction — see the note at the bottom of [permissions.md](permissions.md))
+* **Group-assignable:** Yes, in principle (not `Admin`-gated) — though giving items is currently kept at `Operator` deliberately.
+* **Arguments:** `player` (required); `item` (required); `amount` (optional positive integer) — defaults to the bot's entire held quantity if omitted.
+* **Example:** `!give Alice cobblestone 16` → `Gave 16x Cobblestone to Alice.`
+* **Limits:** 1s cooldown per player · target must be visible and within 5 blocks ("... is too far away." otherwise) · refuses an `amount` greater than what the bot holds.
+* **Notes:** Doesn't walk to the player — it only drops the item where the bot already is, so the target must already be close enough to pick it up. Every successful `!give` is logged with the requester, target, item, and amount.
+* **Module:** `inventory`
 
 ## Access Management (`access`)
 
