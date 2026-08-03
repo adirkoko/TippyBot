@@ -61,6 +61,8 @@ describe('web server', () => {
     expect(login.headers.get('content-type')).toContain('text/html')
     expect(styles.status).toBe(200)
     expect(script.status).toBe(200)
+    expect(styles.headers.get('cache-control')).toBe('no-cache, must-revalidate')
+    expect(script.headers.get('cache-control')).toBe('no-cache, must-revalidate')
   })
 
   it('creates an HttpOnly session on login and revokes it on logout', async () => {

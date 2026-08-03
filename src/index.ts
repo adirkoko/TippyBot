@@ -79,6 +79,7 @@ async function main(): Promise<void> {
       getLogStore: (instanceId) => manager.getLogStore(instanceId),
       password: webConfig.password,
       secureCookies: webConfig.secureCookies,
+      dashboardIntervalMs: webConfig.dashboardIntervalMs,
       host: webConfig.host,
       port: webConfig.port,
       rateLimiterOptions: {

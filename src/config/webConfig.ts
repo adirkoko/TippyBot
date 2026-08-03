@@ -1,6 +1,7 @@
 export const DEFAULT_WEB_HOST = '0.0.0.0'
 export const DEFAULT_WEB_PORT = 3000
 export const DEFAULT_WEB_SECURE_COOKIES = false
+export const DEFAULT_WEB_DASHBOARD_INTERVAL_MS = 2_000
 export const DEFAULT_WEB_LOGIN_MAX_ATTEMPTS = 5
 export const DEFAULT_WEB_LOGIN_LOCKOUT_MS = 15 * 60 * 1000
 export const DEFAULT_LOG_DISK_WARN_MB = 500
@@ -14,6 +15,7 @@ export interface WebConfig {
   port: number
   password: string
   secureCookies: boolean
+  dashboardIntervalMs: number
   loginMaxAttempts: number
   loginLockoutMs: number
   logDiskWarnMb: number
@@ -37,6 +39,13 @@ export function loadWebConfig(env: NodeJS.ProcessEnv = process.env): WebConfig {
     env.WEB_SECURE_COOKIES,
     'WEB_SECURE_COOKIES',
     DEFAULT_WEB_SECURE_COOKIES
+  )
+  const dashboardIntervalMs = parseInteger(
+    env.WEB_DASHBOARD_INTERVAL_MS,
+    'WEB_DASHBOARD_INTERVAL_MS',
+    DEFAULT_WEB_DASHBOARD_INTERVAL_MS,
+    1,
+    MAX_TIMER_INTERVAL_MS
   )
   const loginMaxAttempts = parseInteger(
     env.WEB_LOGIN_MAX_ATTEMPTS,
@@ -70,6 +79,7 @@ export function loadWebConfig(env: NodeJS.ProcessEnv = process.env): WebConfig {
     port,
     password,
     secureCookies,
+    dashboardIntervalMs,
     loginMaxAttempts,
     loginLockoutMs,
     logDiskWarnMb,

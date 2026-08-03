@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="dark light">
+    <meta name="theme-color" content="#101417">
+    <title>Dashboard · TippyBot</title>
+    <link rel="stylesheet" href="/styles.css">
+    <script src="/app.js" defer></script>
+  </head>
+  <body data-page="dashboard">
+    <header class="site-header">
+      <div class="brand-block">
+        <div class="brand-mark small" aria-hidden="true">T</div>
+        <div>
+          <p class="eyebrow">TippyBot Console</p>
+          <h1>Dashboard</h1>
+        </div>
+      </div>
+      <nav class="top-nav" aria-label="ניווט ראשי">
+        <a class="nav-link is-active" href="/" aria-current="page">Dashboard</a>
+        <a class="nav-link" href="/logs">Logs</a>
+      </nav>
+      <div class="header-actions">
+        <span id="dashboard-stream-state" class="stream-state is-idle" aria-live="polite">
+          <span class="state-dot" aria-hidden="true"></span>
+          טוען נתונים…
+        </span>
+        <button id="logout-button" class="secondary-button" type="button">יציאה</button>
+      </div>
+    </header>
+
+    <main class="dashboard-shell">
+      <section aria-labelledby="dashboard-heading">
+        <div class="dashboard-heading">
+          <div>
+            <p class="eyebrow">סקירת מופעים</p>
+            <h2 id="dashboard-heading">מצב הבוטים</h2>
+          </div>
+          <p id="dashboard-summary" class="dashboard-summary" aria-live="polite">
+            טוען את מצב המופעים…
+          </p>
+        </div>
+
+        <div id="dashboard-grid" class="dashboard-grid" aria-busy="true"></div>
+        <div id="dashboard-empty" class="dashboard-empty" hidden>
+          <div class="empty-symbol" aria-hidden="true">◇</div>
+          <h3>אין מופעי בוט להצגה</h3>
+          <p>לא נמצאו כרגע מופעים מנוהלים ב־BotManager.</p>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

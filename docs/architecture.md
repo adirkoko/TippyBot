@@ -9,7 +9,7 @@
 | `src/modules` | Self-contained feature plugins (see [modules.md](modules.md)) |
 | `src/utils` | Small, stateless helpers shared across layers, including central log redaction |
 | `src/config` | Loads and validates bot, web, and log settings and safely updates `.env` |
-| `src/web` | Dependency-free HTTP server/router, general auth, log API/SSE routes, and the vanilla frontend |
+| `src/web` | Dependency-free HTTP server/router, general auth, read-only dashboard/log APIs and SSE routes, and the vanilla frontend |
 
 ## Boot flow
 
@@ -22,7 +22,7 @@ TippyBot can run multiple independent bot instances from one process, coordinate
 5. `connect()` wires `bot.on('chat', ...)` to `commands.handleChatMessage`, wires `end`/`death` to `ctx.tasks.abort(...)` (see [tasks.md](tasks.md)), then calls `init(ctx)` on every module listed in [src/modules/index.ts](../src/modules/index.ts).
 6. Each module registers its actions and commands against `ctx.actions` / `ctx.commands` during `init`. From then on, the registries — not the modules themselves — own how a chat message turns into behavior.
 7. The handle's status moves `'connecting'` → `'online'` on `bot`'s `login` event, and back to `'reconnecting'` on `end`. If the connection drops, `connect()` runs again on a backoff schedule — see [tasks.md](tasks.md#reconnection). `bot` (and therefore `ctx`) is recreated per connection attempt; the services from step 3 persist across reconnects.
-8. After `manager.startAll()`, the authenticated HTTP server starts unless `WEB_ENABLED=false`. It reads only instance snapshots and the matching `LogStore`; it never receives a Mineflayer `Bot` or `IBotContext` and exposes no control operations. See [web.md](web.md).
+8. After `manager.startAll()`, the authenticated HTTP server starts unless `WEB_ENABLED=false`. The dashboard reads `getSnapshot()` for every instance, while the log viewer reads the matching `LogStore`; neither receives a Mineflayer `Bot` or `IBotContext`, and no control operations are exposed. See [web.md](web.md).
 
 ## `IBotContext`
 

@@ -12,7 +12,7 @@ For a deeper look at how it's put together, see the docs:
 * [docs/tasks.md](docs/tasks.md) — the active-task model, `!status`/`!cancel`, and reconnect/disconnect handling
 * [docs/configuration.md](docs/configuration.md) — the instance config file, auth modes, and chat signing
 * [docs/testing.md](docs/testing.md) — running and writing tests
-* [docs/web.md](docs/web.md) — the authenticated real-time web log viewer, configuration, storage, and security
+* [docs/web.md](docs/web.md) — the authenticated dashboard and real-time log viewer, configuration, storage, and security
 * [docs/docker.md](docs/docker.md) — running TippyBot as a single Docker container, volumes, and updates
 
 ## Requirements
@@ -39,8 +39,9 @@ A successful connection logs:
 [steve] [INFO] TippyBot joined the server
 ```
 
-The authenticated web log viewer is enabled by default at
-`http://<tippybot-host>:3000/`. If `WEB_PASSWORD` is not already configured,
+The authenticated web interface is enabled by default at
+`http://<tippybot-host>:3000/`; its log viewer is available at `/logs`. If
+`WEB_PASSWORD` is not already configured,
 the first start generates one and saves it to `.env` without sending it
 through the logging system. See [docs/web.md](docs/web.md) before exposing the
 server outside a trusted local network.

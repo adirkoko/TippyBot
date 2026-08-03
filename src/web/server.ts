@@ -8,11 +8,20 @@ import { requireAuth } from './auth/requireAuth'
 import { SessionStore, type SessionStoreOptions } from './auth/session'
 import { HttpError, Router, sendJson, setSecurityHeaders } from './router'
 import { registerAuthRoutes } from './routes/auth'
+import { registerDashboardRoutes } from './routes/dashboard'
 import { registerLogRoutes, type BotInstanceRegistry, type LogStoreView } from './routes/logs'
 
 const PUBLIC_FILES = new Map<string, PublicFile>([
-  ['/', { name: 'index.html', protected: true, contentType: 'text/html; charset=utf-8' }],
-  ['/index.html', { name: 'index.html', protected: true, contentType: 'text/html; charset=utf-8' }],
+  ['/', { name: 'dashboard.html', protected: true, contentType: 'text/html; charset=utf-8' }],
+  [
+    '/dashboard.html',
+    { name: 'dashboard.html', protected: true, contentType: 'text/html; charset=utf-8' }
+  ],
+  ['/logs', { name: 'logs.html', protected: true, contentType: 'text/html; charset=utf-8' }],
+  [
+    '/logs.html',
+    { name: 'logs.html', protected: true, contentType: 'text/html; charset=utf-8' }
+  ],
   ['/login', { name: 'login.html', protected: false, contentType: 'text/html; charset=utf-8' }],
   ['/login.html', { name: 'login.html', protected: false, contentType: 'text/html; charset=utf-8' }],
   ['/styles.css', { name: 'styles.css', protected: false, contentType: 'text/css; charset=utf-8' }],
@@ -23,7 +32,7 @@ const PUBLIC_FILES = new Map<string, PublicFile>([
 ])
 
 interface PublicFile {
-  name: 'index.html' | 'login.html' | 'styles.css' | 'app.js'
+  name: 'dashboard.html' | 'logs.html' | 'login.html' | 'styles.css' | 'app.js'
   protected: boolean
   contentType: string
 }
@@ -40,6 +49,7 @@ export interface WebServerOptions {
   secureCookies?: boolean
   maxBodyBytes?: number
   sseHeartbeatMs?: number
+  dashboardIntervalMs?: number
 }
 
 export interface StartWebServerOptions extends WebServerOptions {
@@ -67,6 +77,12 @@ export function createWebServer(options: WebServerOptions): Server {
     manager: options.manager,
     getLogStore: options.getLogStore,
     isAuthenticated: (request) => sessions.isAuthenticated(request),
+    heartbeatMs: options.sseHeartbeatMs
+  })
+  registerDashboardRoutes(router, {
+    manager: options.manager,
+    isAuthenticated: (request) => sessions.isAuthenticated(request),
+    intervalMs: options.dashboardIntervalMs,
     heartbeatMs: options.sseHeartbeatMs
   })
 
@@ -176,7 +192,7 @@ async function servePublicFile(
   response.setHeader('Content-Length', contents.byteLength)
   response.setHeader(
     'Cache-Control',
-    file.contentType.startsWith('text/html') ? 'no-store' : 'public, max-age=300'
+    file.contentType.startsWith('text/html') ? 'no-store' : 'no-cache, must-revalidate'
   )
   response.end(request.method === 'HEAD' ? undefined : contents)
 }
@@ -213,5 +229,8 @@ function findPublicDirectory(): string {
     path.resolve(__dirname, '../../src/web/public'),
     path.resolve(process.cwd(), 'src/web/public')
   ]
-  return candidates.find((candidate) => existsSync(path.join(candidate, 'index.html'))) ?? candidates[0]
+  const requiredFiles = ['dashboard.html', 'logs.html', 'login.html', 'styles.css', 'app.js']
+  return candidates.find((candidate) =>
+    requiredFiles.every((file) => existsSync(path.join(candidate, file)))
+  ) ?? candidates[0]
 }

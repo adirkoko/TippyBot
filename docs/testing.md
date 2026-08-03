@@ -41,10 +41,11 @@ npm run test:watch   # watch mode
 * **Web configuration and `.env` updates** (`tests/config/webConfig.test.ts`, `tests/config/envFile.test.ts`) — strict bounds/defaults, content-preserving atomic append, idempotency, and concurrent password setup.
 * **Password setup and auth** (`tests/web/ensureWebPassword.test.ts`, `tests/web/auth.test.ts`) — 24-byte base64url generation, no regeneration/duplication, isolated stdout notification, no password in logging, timing-safe verification, session cookies, expiry/revocation, rate limiting, and the generic auth guard.
 * **HTTP/API/SSE integration** (`tests/web/server.test.ts`) — public login assets, protected pages/APIs, login/logout, per-IP lockout, safe instance summaries, history parameters, live SSE delivery, session-expiry notification, and subscription cleanup on disconnect.
+* **Dashboard API/SSE** (`tests/web/dashboard.test.ts`) — protected dashboard resources, snapshot mapping and last-error redaction, configured live update cadence, session expiry, and timer cleanup after disconnect.
 * **Redaction** (`tests/web/redaction.test.ts`) — inline, structured, nested, error, and circular metadata sanitization.
 
 The frontend is vanilla browser code without a DOM test dependency. Its
-filtering, selection/copy controls, responsive layout, and EventSource behavior
+dashboard cards/navigation, filtering, selection/copy controls, responsive layout, and EventSource behavior
 are covered by the live smoke checklist in [web.md](web.md) and manual browser
 verification rather than unit tests.
 

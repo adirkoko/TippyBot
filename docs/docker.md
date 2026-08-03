@@ -1,8 +1,8 @@
 # Docker
 
 TippyBot can run as a single Docker container: one process, all configured
-bot instances (see [multi-instance.md](multi-instance.md)) plus the [web log
-viewer](web.md), all inside it. This is the recommended way to run it on a
+bot instances (see [multi-instance.md](multi-instance.md)) plus the [web
+dashboard and log viewer](web.md), all inside it. This is the recommended way to run it on a
 home server.
 
 All persistent state lives **outside the project directory**, under a host
@@ -180,8 +180,8 @@ CI/GitHub Actions.
    all four directories are untouched -- rebuilding the image never resets
    persistent state.
 5. From another device on the same network, open
-   `http://<host-lan-address>:3000/` and confirm the log viewer loads and the
-   SSE stream connects.
+   `http://<host-lan-address>:3000/` and confirm the dashboard loads and its
+   SSE stream connects, then open `/logs` and verify the log stream.
 6. `docker inspect --format='{{.State.Health.Status}}' <container>` reports
    `healthy` once the web server is up.
 7. Unset `TIPPYBOT_DATA_ROOT` and confirm `docker compose up` fails immediately

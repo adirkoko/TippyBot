@@ -7,6 +7,7 @@
 
   const page = document.body.dataset.page
   if (page === 'login') setupLoginPage()
+  if (page === 'dashboard') setupDashboardPage()
   if (page === 'logs') setupLogsPage()
 
   function setupLoginPage() {
@@ -64,6 +65,258 @@
         passwordInput.focus()
       }
     })
+  }
+
+  function setupDashboardPage() {
+    const elements = {
+      grid: byId('dashboard-grid'),
+      empty: byId('dashboard-empty'),
+      summary: byId('dashboard-summary'),
+      streamState: byId('dashboard-stream-state'),
+      logout: byId('logout-button')
+    }
+
+    const state = {
+      source: undefined,
+      stopped: false
+    }
+
+    setupLogoutButton(elements.logout)
+    window.addEventListener('beforeunload', stopDashboardStream)
+    void initializeDashboard()
+
+    async function initializeDashboard() {
+      try {
+        await refreshDashboard()
+      } catch (error) {
+        if (isAuthRedirect(error)) return
+        elements.grid.setAttribute('aria-busy', 'false')
+        elements.summary.textContent = 'טעינת מצב המופעים נכשלה.'
+        setDashboardStreamState('error', 'שגיאת חיבור')
+      }
+
+      if (!state.stopped) openDashboardStream()
+    }
+
+    async function refreshDashboard() {
+      const response = await apiFetch('/api/dashboard')
+      const payload = await parseJson(response)
+      const instances = dashboardInstances(payload)
+      if (!response.ok || !instances) throw new Error('Invalid dashboard response')
+      renderDashboard(instances)
+    }
+
+    function openDashboardStream() {
+      stopDashboardStream()
+      state.stopped = false
+
+      const source = new EventSource('/api/dashboard/stream')
+      state.source = source
+
+      source.addEventListener('snapshots', handleSnapshots)
+      source.addEventListener('auth-expired', () => {
+        stopDashboardStream()
+        window.location.replace('/login')
+      })
+      source.onopen = () => {
+        setDashboardStreamState('live', 'מחובר בזמן אמת')
+      }
+      source.onerror = () => {
+        if (state.stopped) return
+        setDashboardStreamState('error', 'מתחבר מחדש…')
+        // EventSource hides the status code of a rejected reconnect. An
+        // authenticated request turns an expired session into a clean redirect.
+        void apiFetch('/api/dashboard').catch(() => undefined)
+      }
+    }
+
+    function handleSnapshots(event) {
+      try {
+        const instances = dashboardInstances(JSON.parse(event.data))
+        if (!instances) return
+        renderDashboard(instances)
+        setDashboardStreamState('live', 'מחובר בזמן אמת')
+      } catch {
+        // Ignore one malformed event. The next full snapshot can recover the UI.
+      }
+    }
+
+    function stopDashboardStream() {
+      state.stopped = true
+      if (state.source) state.source.close()
+      state.source = undefined
+    }
+
+    function renderDashboard(rawInstances) {
+      const instances = rawInstances.filter(isDashboardSnapshot)
+      const focusedCard = document.activeElement && document.activeElement.closest
+        ? document.activeElement.closest('.dashboard-card')
+        : null
+      const focusedInstanceId = focusedCard ? focusedCard.dataset.instanceId : undefined
+      const fragment = document.createDocumentFragment()
+      for (const instance of instances) fragment.append(createDashboardCard(instance))
+
+      elements.grid.replaceChildren(fragment)
+      elements.grid.setAttribute('aria-busy', 'false')
+      elements.grid.hidden = instances.length === 0
+      elements.empty.hidden = instances.length > 0
+      updateDashboardSummary(instances)
+
+      if (focusedInstanceId) {
+        const replacement = Array.from(elements.grid.children).find(
+          (card) => card.dataset.instanceId === focusedInstanceId
+        )
+        if (replacement) replacement.focus({ preventScroll: true })
+      }
+    }
+
+    function createDashboardCard(snapshot) {
+      const status = normalizedStatus(snapshot.status)
+      const online = status === 'online'
+      const card = document.createElement('a')
+      card.className = `dashboard-card status-${status}`
+      card.href = `/logs?instance=${encodeURIComponent(snapshot.id)}`
+      card.dataset.instanceId = snapshot.id
+      card.setAttribute('aria-label', `${snapshot.id}, ${statusLabel(status)}. מעבר ללוגים של המופע`)
+
+      const cardHeader = document.createElement('div')
+      cardHeader.className = 'dashboard-card-header'
+      const identity = document.createElement('div')
+      identity.className = 'instance-identity'
+      const heading = document.createElement('h3')
+      heading.textContent = snapshot.id
+      const username = document.createElement('p')
+      username.textContent = snapshot.username
+      identity.append(heading, username)
+      const badge = span(`status-badge status-${status}`, statusLabel(status))
+      cardHeader.append(identity, badge)
+
+      const metrics = document.createElement('dl')
+      metrics.className = 'metric-grid'
+      metrics.append(
+        createMetric('שרת', formatEndpoint(snapshot.host, snapshot.port), true),
+        createMetric('זמן פעילות', online ? formatDuration(snapshot.uptimeMs) : '—', true),
+        createMetric('Ping', online ? formatPing(snapshot.ping) : '—', true),
+        createMetric('מיקום', online ? formatPosition(snapshot.position) : '—', true),
+        createMetric('ממד', online ? displayValue(snapshot.dimension) : '—')
+      )
+
+      const vitals = document.createElement('div')
+      vitals.className = 'vitals-grid'
+      vitals.append(
+        createVital('בריאות', online ? snapshot.health : undefined, 'health'),
+        createVital('מזון', online ? snapshot.food : undefined, 'food')
+      )
+
+      card.append(cardHeader, metrics, vitals, createTaskPanel(snapshot.activeTask))
+      if (isLastError(snapshot.lastError)) {
+        card.append(createErrorPanel(snapshot.lastError, status === 'errored'))
+      }
+      return card
+    }
+
+    function createMetric(label, value, leftToRight = false) {
+      const group = document.createElement('div')
+      group.className = 'metric'
+      const term = document.createElement('dt')
+      term.className = 'metric-label'
+      term.textContent = label
+      const description = document.createElement('dd')
+      description.className = 'metric-value'
+      description.textContent = value
+      if (leftToRight) description.dir = 'ltr'
+      group.append(term, description)
+      return group
+    }
+
+    function createVital(label, rawValue, kind) {
+      const available = Number.isFinite(rawValue)
+      const value = available ? Math.min(20, Math.max(0, rawValue)) : 0
+      const vital = document.createElement('div')
+      vital.className = `vital${available ? '' : ' is-unavailable'}`
+      const heading = document.createElement('div')
+      heading.className = 'vital-heading'
+      const displayedValue = document.createElement('strong')
+      displayedValue.className = 'vital-value'
+      displayedValue.textContent = available ? formatDecimal(rawValue) : '—'
+      heading.append(span('vital-label', label), displayedValue)
+      const progress = document.createElement('progress')
+      progress.className = `vital-progress ${kind}`
+      progress.max = 20
+      progress.value = value
+      progress.setAttribute('aria-label', available ? `${label}: ${formatDecimal(rawValue)} מתוך 20` : `${label}: לא זמין`)
+      vital.append(heading, progress)
+      return vital
+    }
+
+    function createTaskPanel(task) {
+      const panel = document.createElement('section')
+      panel.className = 'task-panel'
+      panel.setAttribute('aria-label', 'משימה פעילה')
+      const heading = document.createElement('div')
+      heading.className = 'task-heading'
+      heading.textContent = 'משימה פעילה'
+      panel.append(heading)
+
+      if (!isActiveTask(task)) {
+        const empty = document.createElement('p')
+        empty.textContent = 'אין משימה פעילה'
+        panel.append(empty)
+        return panel
+      }
+
+      const name = document.createElement('p')
+      name.className = 'task-name'
+      name.textContent = task.name
+      const details = document.createElement('p')
+      details.className = 'task-details'
+      details.textContent = `ביקש/ה: ${task.requestedBy} · זמן ריצה: ${formatDuration(Date.now() - task.startedAt)}`
+      panel.append(name, details)
+      return panel
+    }
+
+    function createErrorPanel(error, prominent) {
+      const panel = document.createElement('section')
+      panel.className = `error-panel${prominent ? ' is-prominent' : ''}`
+      panel.setAttribute('aria-label', 'שגיאה אחרונה')
+      const heading = document.createElement('div')
+      heading.className = 'error-heading'
+      heading.textContent = 'שגיאה אחרונה'
+      const message = document.createElement('p')
+      message.className = 'error-message'
+      message.textContent = error.message
+      const occurredAt = document.createElement('time')
+      occurredAt.className = 'error-time'
+      occurredAt.textContent = formatDateTime(error.at)
+      const date = new Date(error.at)
+      if (!Number.isNaN(date.getTime())) occurredAt.dateTime = date.toISOString()
+      panel.append(heading, message, occurredAt)
+      return panel
+    }
+
+    function updateDashboardSummary(instances) {
+      const online = instances.filter((instance) => instance.status === 'online').length
+      const reconnecting = instances.filter((instance) => instance.status === 'reconnecting').length
+      const errored = instances.filter((instance) => instance.status === 'errored').length
+      const summary = `${online} מחוברים · ${reconnecting} מתחברים מחדש · ${errored} בשגיאה`
+      if (elements.summary.textContent !== summary) elements.summary.textContent = summary
+    }
+
+    function setDashboardStreamState(kind, text) {
+      if (
+        elements.streamState.dataset.state === kind &&
+        elements.streamState.dataset.label === text
+      ) return
+
+      elements.streamState.dataset.state = kind
+      elements.streamState.dataset.label = text
+      elements.streamState.className = `stream-state is-${kind}`
+      elements.streamState.replaceChildren()
+      const dot = document.createElement('span')
+      dot.className = 'state-dot'
+      dot.setAttribute('aria-hidden', 'true')
+      elements.streamState.append(dot, document.createTextNode(text))
+    }
   }
 
   function setupLogsPage() {
@@ -129,14 +382,7 @@
       const recent = filteredRecords().slice(-requested)
       void copyRecords(recent, `${recent.length} הרשומות האחרונות הועתקו.`)
     })
-    elements.logout.addEventListener('click', async () => {
-      elements.logout.disabled = true
-      try {
-        await fetch('/api/logout', { method: 'POST', credentials: 'same-origin' })
-      } finally {
-        window.location.replace('/login')
-      }
-    })
+    setupLogoutButton(elements.logout)
     window.addEventListener('beforeunload', closeStream)
 
     void loadInstances()
@@ -170,9 +416,10 @@
         }
 
         elements.instance.disabled = false
-        const remembered = readRememberedInstance()
-        if (remembered && Array.from(elements.instance.options).some((item) => item.value === remembered)) {
-          elements.instance.value = remembered
+        const requested = readRequestedInstance()
+        const preferred = requested === null ? readRememberedInstance() : requested
+        if (preferred && Array.from(elements.instance.options).some((item) => item.value === preferred)) {
+          elements.instance.value = preferred
         }
         await selectInstance(elements.instance.value)
       } catch (error) {
@@ -488,6 +735,104 @@
     }
   }
 
+  function setupLogoutButton(button) {
+    button.addEventListener('click', async () => {
+      button.disabled = true
+      try {
+        await fetch('/api/logout', { method: 'POST', credentials: 'same-origin' })
+      } finally {
+        window.location.replace('/login')
+      }
+    })
+  }
+
+  function dashboardInstances(payload) {
+    if (Array.isArray(payload)) return payload
+    if (payload && typeof payload === 'object' && Array.isArray(payload.instances)) {
+      return payload.instances
+    }
+    return null
+  }
+
+  function isDashboardSnapshot(value) {
+    return Boolean(value) &&
+      typeof value === 'object' &&
+      typeof value.id === 'string' &&
+      typeof value.username === 'string' &&
+      typeof value.host === 'string' &&
+      Number.isFinite(value.port) &&
+      typeof value.status === 'string'
+  }
+
+  function isActiveTask(value) {
+    return Boolean(value) &&
+      typeof value === 'object' &&
+      typeof value.name === 'string' &&
+      typeof value.requestedBy === 'string' &&
+      Number.isFinite(value.startedAt)
+  }
+
+  function isLastError(value) {
+    return Boolean(value) &&
+      typeof value === 'object' &&
+      typeof value.message === 'string' &&
+      Number.isFinite(value.at)
+  }
+
+  function normalizedStatus(status) {
+    return ['connecting', 'online', 'reconnecting', 'errored'].includes(status)
+      ? status
+      : 'unknown'
+  }
+
+  function formatEndpoint(host, port) {
+    const displayHost = host.includes(':') && !host.startsWith('[') ? `[${host}]` : host
+    return `${displayHost}:${port}`
+  }
+
+  function formatDuration(milliseconds) {
+    if (!Number.isFinite(milliseconds)) return '—'
+    const totalSeconds = Math.max(0, Math.floor(milliseconds / 1000))
+    const hours = Math.floor(totalSeconds / 3600)
+    const minutes = Math.floor((totalSeconds % 3600) / 60)
+    const seconds = totalSeconds % 60
+    return [hours, minutes, seconds].map((part) => String(part).padStart(2, '0')).join(':')
+  }
+
+  function formatPing(value) {
+    return Number.isFinite(value) ? `${Math.round(value)} ms` : '—'
+  }
+
+  function formatPosition(position) {
+    if (!position ||
+      !Number.isFinite(position.x) ||
+      !Number.isFinite(position.y) ||
+      !Number.isFinite(position.z)) return '—'
+    return `${formatCoordinate(position.x)} / ${formatCoordinate(position.y)} / ${formatCoordinate(position.z)}`
+  }
+
+  function formatCoordinate(value) {
+    return new Intl.NumberFormat('he-IL', { maximumFractionDigits: 2 }).format(value)
+  }
+
+  function formatDecimal(value) {
+    return new Intl.NumberFormat('he-IL', { maximumFractionDigits: 1 }).format(value)
+  }
+
+  function formatDateTime(value) {
+    const date = new Date(value)
+    if (Number.isNaN(date.getTime())) return '—'
+    return new Intl.DateTimeFormat('he-IL', {
+      dateStyle: 'short',
+      timeStyle: 'medium',
+      hour12: false
+    }).format(date)
+  }
+
+  function displayValue(value) {
+    return typeof value === 'string' && value ? value : '—'
+  }
+
   async function apiFetch(url, init) {
     const response = await fetch(url, { credentials: 'same-origin', ...init })
     if (response.status === 401) {
@@ -506,6 +851,14 @@
   function readRememberedInstance() {
     try {
       return sessionStorage.getItem('tippybot.instance')
+    } catch {
+      return null
+    }
+  }
+
+  function readRequestedInstance() {
+    try {
+      return new URLSearchParams(window.location.search).get('instance')
     } catch {
       return null
     }

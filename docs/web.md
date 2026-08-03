@@ -1,10 +1,10 @@
-# Web log viewer
+# Web dashboard and log viewer
 
-TippyBot includes a small, dependency-free web server for viewing every bot
-instance's logs. It runs in the same Node.js process as `BotManager`, serves a
-vanilla HTML/CSS/JavaScript interface, and streams new entries with
-Server-Sent Events (SSE). This first web phase is read-only: it cannot send
-commands to a bot or change bot state.
+TippyBot includes a small, dependency-free web server with a dashboard for
+all bot instances and a focused real-time log viewer. It runs in the same
+Node.js process as `BotManager`, serves a vanilla HTML/CSS/JavaScript
+interface, and uses Server-Sent Events (SSE) for live updates. The interface
+is read-only: it cannot send commands to a bot or change bot state.
 
 ## Starting the server
 
@@ -14,6 +14,10 @@ Open:
 ```text
 http://<host-running-tippybot>:3000/
 ```
+
+`/` is the multi-instance dashboard. `/logs` is the detailed log viewer. The
+shared navigation switches between them, and selecting a dashboard card opens
+`/logs?instance=<id>` with that instance selected.
 
 The default bind address is `0.0.0.0`, so another device on the same network
 can connect using the host machine's LAN address. Set `WEB_HOST=127.0.0.1` if
@@ -61,6 +65,7 @@ directly. Do not paste it into chat, issue reports, or logs.
 | `WEB_PORT` | `3000` | HTTP port, from 1 through 65535. |
 | `WEB_PASSWORD` | generated | Shared login password; generated once when missing. |
 | `WEB_SECURE_COOKIES` | `false` | Add `Secure` to session cookies; enable only for HTTPS access. |
+| `WEB_DASHBOARD_INTERVAL_MS` | `2000` | Interval between complete dashboard snapshot broadcasts. |
 | `WEB_LOGIN_MAX_ATTEMPTS` | `5` | Failed attempts allowed per IP before a temporary lockout. |
 | `WEB_LOGIN_LOCKOUT_MS` | `900000` | Lockout duration per IP (15 minutes by default). |
 | `LOG_DISK_WARN_MB` | `500` | Per-instance log-directory warning threshold. |
@@ -81,9 +86,28 @@ limit is reached, that IP is temporarily blocked for the configured lockout
 period. TippyBot does not trust `X-Forwarded-For` by default; a reverse proxy
 should enforce its own rate limits as well.
 
-Without a valid session, the log page, instance API, history API, and SSE
-stream are unavailable. Only the login page and the static assets it needs
-are public.
+Without a valid session, the dashboard, log page, APIs, and SSE streams are
+unavailable. Only the login page and the static assets it needs are public.
+
+## Dashboard
+
+The home page displays every instance returned by `BotManager.getInstances()`
+at once. Each card is built from the instance's read-only `getSnapshot()` and
+shows identity, connection status, uptime, ping, health, food, position,
+dimension, active task, and the last error. Live-only fields display `—` while
+the instance is not online. The summary reports online, reconnecting, and
+errored instance counts.
+
+The page first loads `GET /api/dashboard`, then receives a refreshed
+`{ instances: BotInstanceSnapshot[] }` envelope over SSE every
+`WEB_DASHBOARD_INTERVAL_MS`. Slow clients retain only the newest pending state
+instead of accumulating obsolete snapshots.
+Session validity is rechecked while the stream is open, and all timers are
+released when the connection closes.
+
+Before a snapshot leaves the server, `lastError.message` is passed through the
+same central redaction utility used by log persistence. The returned object is
+a detached copy; the handle's source snapshot is never mutated.
 
 ## Log records and categories
 
@@ -134,6 +158,8 @@ All endpoints below except login require the session cookie:
 |---|---|
 | `POST /api/login` | Authenticate and create a session. |
 | `POST /api/logout` | Destroy the current session. |
+| `GET /api/dashboard` | Return `{ instances: BotInstanceSnapshot[] }` with the current state. |
+| `GET /api/dashboard/stream` | Stream refreshed `{ instances: [...] }` envelopes with SSE. |
 | `GET /api/instances` | Return the instances known to `BotManager`. |
 | `GET /api/logs/:id?limit=&before=` | Read a page of history; `before` is the opaque cursor returned by the previous page. |
 | `GET /api/logs/:id/stream` | Stream new redacted records as SSE. |
@@ -157,16 +183,26 @@ password is not removed accidentally.
    confirm only `[REDACTED]` reaches history and SSE.
 4. Verify a failed login, a successful login, logout/revocation, and temporary
    IP lockout after `WEB_LOGIN_MAX_ATTEMPTS` failures.
-5. Open the log page, switch between at least two configured instances, and
+5. Open `/`, verify multiple instance cards and summary counts across online,
+   connecting, reconnecting, and errored states. Confirm offline live fields
+   show `—`, active-task runtime is rendered, and errored cards emphasize the
+   redacted last error.
+6. Follow a dashboard card to `/logs?instance=<id>` and confirm the query
+   parameter selects that instance ahead of any previous `sessionStorage`
+   choice. Navigate between Dashboard and Logs in both directions.
+7. Open the log page, switch between at least two configured instances, and
    produce live `connection`, `permissions`, and `modules` entries. Confirm the
    SSE view follows only the selected instance.
-6. Exercise multi-level/category filtering, text search, row multi-selection,
+8. Exercise multi-level/category filtering, text search, row multi-selection,
    copy-selected, and copy-last-N. Repeat at a narrow/mobile viewport and, on a
-   trusted LAN, from another device using the host's LAN address.
-7. Run the automated injected-clock rotation test, or keep a test instance
+   trusted LAN, from another device using the host's LAN address. Check RTL,
+   light/dark color schemes, and reduced-motion mode on both pages.
+9. Disconnect and reconnect the dashboard stream, then expire/logout its
+   session. Confirm live updates resume cleanly and expiry returns to login.
+10. Run the automated injected-clock rotation test, or keep a test instance
    across local midnight. Confirm the closed `.jsonl` becomes `.jsonl.gz`, the
    current day remains writable, and pagination crosses both formats.
-8. Temporarily lower `LOG_DISK_WARN_MB` and
+11. Temporarily lower `LOG_DISK_WARN_MB` and
    `LOG_DISK_CHECK_INTERVAL_MS`, create enough test log data to cross the
    threshold, and confirm one `warn`/`storage` record appears without deleting
    history. Restore production values afterwards.
