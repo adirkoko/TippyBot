@@ -88,3 +88,25 @@ export function isWithinDistance(
 ): boolean {
   return distanceSquared(a, b) <= maxDistance * maxDistance
 }
+
+/**
+ * Picks the closest position to `from`, deterministically -- so "which chest/item did you
+ * mean" never depends on unspecified iteration order. Ties are broken by a stable position
+ * string comparison rather than left to whatever order the candidates happened to arrive in.
+ * @param candidates The candidate positions
+ * @param from The reference position
+ * @returns The closest candidate, or null if candidates is empty
+ */
+export function nearestPosition<T extends Vec3Like>(candidates: T[], from: Vec3Like): T | null {
+  if (candidates.length === 0) return null
+
+  return [...candidates].sort((a, b) => {
+    const diff = distanceSquared(a, from) - distanceSquared(b, from)
+    if (diff !== 0) return diff
+    return positionKey(a).localeCompare(positionKey(b))
+  })[0]
+}
+
+function positionKey(pos: Vec3Like): string {
+  return `${pos.x},${pos.y},${pos.z}`
+}

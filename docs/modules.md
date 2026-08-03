@@ -46,6 +46,22 @@ Provides `!sethome`/`!home`. Backed by `ctx.homes` (`HomeService`) rather than a
 
 Provides `!inventory`, `!equip`, `!drop`, `!give`. None of these are tasks — they're single `await`-and-done calls into mineflayer's own inventory API (`bot.inventory.items()`, `bot.equip`, `bot.toss`), with no cancellable multi-step process to track. Item-name resolution is shared, reusable logic in [`src/utils/items.ts`](../src/utils/items.ts) (`resolveItemName`, `countItem`, `summarizeInventory`) rather than being reimplemented per command — reuse it if you add more item-related commands later (`!mine`, when it lands, will need the same "which item/block did they mean" resolution). `resolveItemName` deliberately refuses ambiguous substring matches instead of guessing, per [commands.md](commands.md#inventory--equipment-inventory).
 
+### `chests`
+
+Provides `!deposit`/`!withdraw`. Unlike `inventory`, these *are* tasks — they involve walking to a chest and opening a window, both of which can fail, time out, or be cancelled mid-flight. Implementation notes:
+
+* Finds the nearest matching chest block (`chest`/`trapped_chest`) within a fixed search radius via `bot.findBlocks` + [`nearestPosition`](../src/utils/navigation.ts) — never picks arbitrarily among multiple candidates; ties are broken deterministically.
+* The opened `Chest` window (from `bot.openChest(...)`) is held in a variable closed over by *both* the main execution path (in a `finally`) and the task's `onEnd` callback, so a `!cancel`/`!stop`/timeout/disconnect mid-transaction still closes it — see [tasks.md](tasks.md) for why both paths matter.
+* Reuses `resolveItemName`/`countItem` from `src/utils/items.ts`, same as `inventory`.
+
+### `gathering`
+
+Provides `!collect` today; `!mine` will be added to this same module later. Implementation notes:
+
+* Finds nearby dropped-item entities via `Entity.getDroppedItem()` (a prismarine-entity helper that reads the entity's item-stack metadata for you) rather than hand-parsing entity metadata.
+* Walks to the nearest matching drop, waits briefly for Minecraft's automatic pickup to register, then re-evaluates — looping (up to a safety cap) until the requested amount is collected or no matching drops remain in range.
+* Reports how many items it actually collected even if the run ended early (cancelled, timed out, or ran out of drops) rather than treating a partial result as a failure.
+
 ## Writing a new module
 
 1. Create `src/modules/<name>/index.ts` exporting a default object implementing `IModule`:

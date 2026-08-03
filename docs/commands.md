@@ -30,6 +30,9 @@ Permission levels and how group access works are explained in full in [permissio
 | `!equip <item>` | Equips a matching item to hand | `Member` | `inventory` |
 | `!drop <item> [amount]` | Drops a quantity of a matching item | `Member` | `inventory` |
 | `!give <player> <item> [amount]` | Gives a quantity of a matching item to a nearby player | `Operator` | `inventory` |
+| `!deposit <item> [amount]` | Deposits items into the nearest reachable chest | `Member` | `chests` |
+| `!withdraw <item> [amount]` | Withdraws items from the nearest reachable chest | `Member` | `chests` |
+| `!collect <item> [amount]` | Picks up dropped items of a given type from the ground nearby | `Member` | `gathering` |
 | `!access me` | Shows your own level and group memberships | `User` | `access` |
 | `!access player <player>` | Shows another player's level | `User` | `access` |
 | `!access grant <player> operator` | Grants Operator | `Admin` | `access` |
@@ -301,13 +304,55 @@ Item names are resolved via [`resolveItemName`](../src/utils/items.ts): an exact
 
 * **Syntax:** `!give <player> <item> [amount]`
 * **Description:** Drops a quantity of a matching item near a nearby player.
-* **Minimum role:** `Operator` (first-stage restriction — see the note at the bottom of [permissions.md](permissions.md))
+* **Minimum role:** `Operator` (a deliberately conservative starting point for a command that hands out items to players; may be revisited later)
 * **Group-assignable:** Yes, in principle (not `Admin`-gated) — though giving items is currently kept at `Operator` deliberately.
 * **Arguments:** `player` (required); `item` (required); `amount` (optional positive integer) — defaults to the bot's entire held quantity if omitted.
 * **Example:** `!give Alice cobblestone 16` → `Gave 16x Cobblestone to Alice.`
 * **Limits:** 1s cooldown per player · target must be visible and within 5 blocks ("... is too far away." otherwise) · refuses an `amount` greater than what the bot holds.
 * **Notes:** Doesn't walk to the player — it only drops the item where the bot already is, so the target must already be close enough to pick it up. Every successful `!give` is logged with the requester, target, item, and amount.
 * **Module:** `inventory`
+
+## Chests (`chests`)
+
+Both commands register a task with `ctx.tasks` (see [tasks.md](tasks.md)) for the walk-and-transfer, so they can't run at the same time as each other or as any other long-running command (`!come`, `!follow`, `!goto`, `!s`, `!collect`). If multiple chests are in range, the *closest* one is always picked — via [`nearestPosition`](../src/utils/navigation.ts), the same deterministic tie-broken distance rule used elsewhere — never an arbitrary one.
+
+#### `!deposit <item> [amount]`
+
+* **Syntax:** `!deposit <item> [amount]`
+* **Description:** Walks to the nearest chest within range and deposits a quantity of a matching item into it.
+* **Minimum role:** `Member`
+* **Group-assignable:** Yes.
+* **Arguments:** `item` (required); `amount` (optional positive integer) — defaults to the bot's entire held quantity if omitted.
+* **Example:** `!deposit cobblestone 32` → `Deposited 32x Cobblestone.`
+* **Limits:** 2s cooldown per player · searches within 16 blocks for a chest (`chest`/`trapped_chest` only — not `ender_chest`) · must end within 4.5 blocks (interaction reach) to open it · 30s overall task timeout.
+* **Notes:** Refuses upfront if the bot isn't holding any of the item at all, and again (in case anything changed mid-walk) right before depositing. The chest window is always closed — on success, failure, cancellation, or disconnect — never left open.
+* **Module:** `chests`
+
+#### `!withdraw <item> [amount]`
+
+* **Syntax:** `!withdraw <item> [amount]`
+* **Description:** Walks to the nearest chest within range and withdraws a quantity of a matching item from it.
+* **Minimum role:** `Member`
+* **Group-assignable:** Yes.
+* **Arguments:** `item` (required); `amount` (optional positive integer) — defaults to whatever quantity of that item the chest holds if omitted.
+* **Example:** `!withdraw cobblestone 32` → `Withdrew 32x Cobblestone.`
+* **Limits:** Same as `!deposit` (2s cooldown, 16-block search, 4.5-block reach, 30s task timeout).
+* **Notes:** "There's no ... in that chest." if the chest doesn't have any; "The chest only has N ..." if `amount` exceeds what's there. Same guaranteed window-close behavior as `!deposit`.
+* **Module:** `chests`
+
+## Gathering (`gathering`)
+
+#### `!collect <item> [amount]`
+
+* **Syntax:** `!collect <item> [amount]`
+* **Description:** Locates dropped items of a given type on the ground nearby and walks to each one in turn (closest first) so Minecraft's automatic pickup collects them.
+* **Minimum role:** `Member`
+* **Group-assignable:** Yes.
+* **Arguments:** `item` (required); `amount` (optional positive integer) — defaults to collecting everything found in range if omitted.
+* **Example:** `!collect oak_log 10` → `Collected 10x Oak Log.`
+* **Limits:** 2s cooldown per player · 16-block search radius · visits at most 20 separate drops per run (safety cap) · 10s per-drop walk timeout · 60s overall task timeout.
+* **Notes:** Registers a task with `ctx.tasks`, same as `!deposit`/`!withdraw`/`!come`/etc. — only one long-running command at a time. If it's interrupted partway (cancelled, timed out, or ran out of nearby drops) after picking up *some* items, it still reports how many it actually collected rather than just failing silently. "Couldn't find any ... nearby." if none were found at all.
+* **Module:** `gathering`
 
 ## Access Management (`access`)
 
