@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="dark light">
+    <meta name="theme-color" content="#101417">
+    <title>ניהול בוטים · TippyBot</title>
+    <link rel="stylesheet" href="/styles.css">
+    <script src="/app.js" defer></script>
+  </head>
+  <body data-page="bots">
+    <header class="site-header">
+      <div class="brand-block">
+        <div class="brand-mark small" aria-hidden="true">T</div>
+        <div>
+          <p class="eyebrow">TippyBot Console</p>
+          <h1>ניהול בוטים</h1>
+        </div>
+      </div>
+      <nav class="top-nav" aria-label="ניווט ראשי">
+        <a class="nav-link" href="/">Dashboard</a>
+        <a class="nav-link" href="/logs">Logs</a>
+        <a class="nav-link is-active" href="/bots" aria-current="page">Bots</a>
+      </nav>
+      <div class="header-actions">
+        <button id="logout-button" class="secondary-button" type="button">יציאה</button>
+      </div>
+    </header>
+
+    <main class="bots-shell">
+      <section aria-labelledby="bots-heading">
+        <div class="bots-heading">
+          <div>
+            <p class="eyebrow">מופעי בוט</p>
+            <h2 id="bots-heading">רשימת מופעים</h2>
+          </div>
+          <div class="bots-heading-actions">
+            <p id="bots-summary" class="bots-summary" aria-live="polite">טוען מופעים…</p>
+            <button id="add-bot-button" class="primary-button compact" type="button">הוספת בוט</button>
+          </div>
+        </div>
+
+        <div id="bots-loading" class="bots-status-panel" role="status">טוען מופעים…</div>
+
+        <div id="bots-error" class="bots-status-panel is-error" role="alert" hidden>
+          <p>טעינת רשימת המופעים נכשלה.</p>
+          <button id="bots-retry" class="secondary-button compact" type="button">ניסיון חוזר</button>
+        </div>
+
+        <div id="bots-empty" class="bots-empty" hidden>
+          <div class="empty-symbol" aria-hidden="true">◇</div>
+          <h3>אין מופעי בוט מוגדרים</h3>
+          <p>לחצו על "הוספת בוט" כדי להתחיל.</p>
+        </div>
+
+        <div id="bots-table-wrap" class="bots-table-wrap" hidden>
+          <table class="bots-table">
+            <thead>
+              <tr>
+                <th scope="col">ID</th>
+                <th scope="col">סטטוס</th>
+                <th scope="col">שרת</th>
+                <th scope="col">שם משתמש</th>
+                <th scope="col">אימות</th>
+                <th scope="col">חיבור אוטומטי</th>
+                <th scope="col">פעולות</th>
+              </tr>
+            </thead>
+            <tbody id="bots-table-body"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <dialog id="bot-form-dialog" class="app-dialog bot-form-dialog">
+      <form id="bot-form" novalidate>
+        <h2 id="bot-form-title">הוספת מופע</h2>
+        <p id="bot-form-error" class="form-error" role="alert" aria-live="polite"></p>
+
+        <div class="form-grid">
+          <div class="field">
+            <label class="field-label" for="bot-form-id">ID</label>
+            <input id="bot-form-id" name="id" required pattern="[A-Za-z0-9_-]{1,32}" autocomplete="off">
+          </div>
+
+          <div class="field">
+            <label class="field-label" for="bot-form-host">שרת (host)</label>
+            <input id="bot-form-host" name="host" required autocomplete="off">
+          </div>
+
+          <div class="field">
+            <label class="field-label" for="bot-form-port">פורט</label>
+            <input id="bot-form-port" name="port" type="number" min="1" max="65535" required inputmode="numeric">
+          </div>
+
+          <div class="field">
+            <label class="field-label" for="bot-form-username">שם משתמש</label>
+            <input id="bot-form-username" name="username" required autocomplete="off">
+          </div>
+
+          <div class="field">
+            <label class="field-label" for="bot-form-auth">אימות</label>
+            <select id="bot-form-auth" name="auth">
+              <option value="microsoft">Microsoft</option>
+              <option value="offline">Offline</option>
+            </select>
+          </div>
+
+          <div class="field">
+            <label class="field-label" for="bot-form-prefix">תחילית פקודות</label>
+            <input id="bot-form-prefix" name="commandPrefix" placeholder="!" autocomplete="off">
+          </div>
+
+          <div class="field field-wide">
+            <label class="field-label" for="bot-form-admins">מנהלים (usernames, מופרדים בפסיק)</label>
+            <input id="bot-form-admins" name="admins" placeholder="Player1, Player2" autocomplete="off">
+          </div>
+
+          <div class="field field-wide">
+            <label class="field-label" for="bot-form-profiles">תיקיית auth_cache (אופציונלי)</label>
+            <input id="bot-form-profiles" name="profilesFolder" placeholder="./auth_cache/<id>" autocomplete="off">
+          </div>
+        </div>
+
+        <p id="bot-form-auth-warning" class="form-warning" hidden>
+          שינוי מצב האימות לא מוחק את תיקיית auth_cache הקיימת של המופע — היא עלולה להישאר ללא שימוש, וייתכן שיידרש חיבור מחדש.
+        </p>
+
+        <label class="checkbox-field">
+          <input id="bot-form-auto-connect" name="autoConnect" type="checkbox" checked>
+          <span>חיבור אוטומטי בעליית האפליקציה</span>
+        </label>
+
+        <div class="dialog-actions">
+          <button type="button" id="bot-form-cancel" class="secondary-button">ביטול</button>
+          <button type="submit" id="bot-form-submit" class="primary-button">שמירה</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="delete-dialog" class="app-dialog confirm-dialog">
+      <h2>מחיקת מופע</h2>
+      <p>למחוק את המופע <strong id="delete-dialog-id"></strong>?</p>
+      <p class="form-warning">
+        הפעולה תנתק את המופע ותסיר אותו מהרשימה. הנתונים שלו (data, logs ו-auth_cache) לא יימחקו מהדיסק.
+      </p>
+      <div class="dialog-actions">
+        <button type="button" id="delete-dialog-cancel" class="secondary-button">ביטול</button>
+        <button type="button" id="delete-dialog-confirm" class="danger-button">מחיקה</button>
+      </div>
+    </dialog>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  </body>
+</html>

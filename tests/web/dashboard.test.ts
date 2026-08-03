@@ -193,7 +193,8 @@ function fakeHandle(snapshot: BotInstanceSnapshot, onSnapshot?: () => void): IBo
     username: snapshot.username,
     auth: 'offline',
     commandPrefix: '!',
-    admins: []
+    admins: [],
+    autoConnect: true
   }
   return {
     id: snapshot.id,
@@ -203,7 +204,9 @@ function fakeHandle(snapshot: BotInstanceSnapshot, onSnapshot?: () => void): IBo
     getSnapshot: () => {
       onSnapshot?.()
       return snapshot
-    }
+    },
+    connect: () => Promise.resolve(),
+    disconnect: () => Promise.resolve()
   }
 }
 

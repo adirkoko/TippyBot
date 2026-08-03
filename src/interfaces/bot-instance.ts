@@ -3,12 +3,19 @@ import type { IBotConfig } from './config'
 import type { ActiveTaskInfo } from './tasks'
 
 /**
+ * 'disconnected' -- not currently trying to connect (never started, or connect() /
+ *                   disconnect() was explicitly requested) -- no auto-retry
  * 'connecting'   -- starting up, no successful login yet
  * 'online'       -- currently logged in to the server
- * 'reconnecting' -- lost connection, retrying on a backoff schedule
+ * 'reconnecting' -- lost connection unexpectedly, retrying on a backoff schedule
  * 'errored'      -- startup failed fatally (e.g. corrupt config/data on disk) and is not retrying
  */
-export type BotInstanceStatus = 'connecting' | 'online' | 'reconnecting' | 'errored'
+export type BotInstanceStatus = 'disconnected' | 'connecting' | 'online' | 'reconnecting' | 'errored'
+
+/** Statuses where the instance is trying to reach (or already on) a server. */
+export const ACTIVE_BOT_STATUSES: readonly BotInstanceStatus[] = ['connecting', 'online', 'reconnecting']
+/** Statuses where the instance is at rest -- not connected and not retrying. */
+export const INACTIVE_BOT_STATUSES: readonly BotInstanceStatus[] = ['disconnected', 'errored']
 
 export interface BotInstanceError {
   message: string
@@ -48,11 +55,14 @@ export interface BotInstanceSnapshot {
 }
 
 /**
- * Read-only handle to a running bot instance, returned by startBot and held
- * by BotManager. getSnapshot() is the intended API for any future control
- * surface -- it never hands out mineflayer's Bot instance or IBotContext, so
- * that surface stays decoupled from mineflayer and from the framework's
- * internal wiring.
+ * Handle to a bot instance, returned by startBot and held by BotManager.
+ * getSnapshot() is the intended read API for any control surface -- it never
+ * hands out mineflayer's Bot instance or IBotContext, so that surface stays
+ * decoupled from mineflayer and from the framework's internal wiring.
+ *
+ * connect()/disconnect() are the only lifecycle control points; both queue
+ * behind any operation already in flight for this instance, so overlapping
+ * calls can never race each other.
  */
 export interface IBotInstanceHandle {
   readonly id: string
@@ -60,4 +70,8 @@ export interface IBotInstanceHandle {
   getStatus(): BotInstanceStatus
   getLastError(): BotInstanceError | undefined
   getSnapshot(): BotInstanceSnapshot
+  /** Starts (or resumes) connecting. Rejects if already connecting/online/reconnecting. */
+  connect(): Promise<void>
+  /** Cleanly disconnects and stops auto-reconnecting until connect() is called again. Rejects if already disconnected/errored. */
+  disconnect(reason?: string): Promise<void>
 }

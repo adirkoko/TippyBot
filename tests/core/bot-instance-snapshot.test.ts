@@ -10,7 +10,8 @@ const config: IBotConfig = {
   username: 'SteveBot',
   auth: 'microsoft',
   commandPrefix: '!',
-  admins: []
+  admins: [],
+  autoConnect: true
 }
 
 const activeTask: ActiveTaskInfo = {

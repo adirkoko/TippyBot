@@ -209,6 +209,99 @@ describe('web server', () => {
   })
 })
 
+describe('method dispatch', () => {
+  it('routes PUT and DELETE requests to the Router instead of rejecting them upfront', async () => {
+    const { baseUrl } = await launch()
+    const { cookie } = await postLogin(baseUrl, 'correct-password')
+
+    // No route exists for this made-up path, but reaching the router (which
+    // finds no match) surfaces as 404 -- previously any PUT/DELETE was
+    // rejected with 405 before the router ever saw the request.
+    const put = await fetch(`${baseUrl}/api/nonexistent-resource/alpha`, {
+      method: 'PUT',
+      headers: { Cookie: cookie }
+    })
+    expect(put.status).toBe(404)
+    await expect(put.json()).resolves.toEqual({ error: 'Not found' })
+
+    const del = await fetch(`${baseUrl}/api/nonexistent-resource/alpha`, {
+      method: 'DELETE',
+      headers: { Cookie: cookie }
+    })
+    expect(del.status).toBe(404)
+    await expect(del.json()).resolves.toEqual({ error: 'Not found' })
+  })
+
+  it('reaches the router for PUT on a path that exists for a different method, distinguishing method-mismatch (404) from an unsupported method (405)', async () => {
+    const { baseUrl } = await launch()
+    const { cookie } = await postLogin(baseUrl, 'correct-password')
+
+    // /api/instances exists (GET only); PUTting it should fall through the
+    // router (no match) to a plain 404, not to the unsupported-method 405.
+    const response = await fetch(`${baseUrl}/api/instances`, { method: 'PUT', headers: { Cookie: cookie } })
+    expect(response.status).toBe(404)
+  })
+
+  it('still returns 405 with an updated Allow header for a genuinely unsupported method', async () => {
+    const { baseUrl } = await launch()
+
+    // /login is public, so this isolates the 405 dispatch logic from auth
+    // (an unauthenticated request to a protected path 401s before the
+    // method check ever runs, regardless of method -- see the auth test below).
+    const response = await fetch(`${baseUrl}/login`, { method: 'PATCH' })
+
+    expect(response.status).toBe(405)
+    expect(response.headers.get('allow')).toBe('GET, HEAD, POST, PUT, DELETE')
+    await expect(response.json()).resolves.toEqual({ error: 'Method not allowed' })
+  })
+
+  it('leaves OPTIONS behavior unchanged (still not a recognized method)', async () => {
+    const { baseUrl } = await launch()
+
+    const response = await fetch(`${baseUrl}/login`, { method: 'OPTIONS' })
+
+    expect(response.status).toBe(405)
+  })
+
+  it('leaves HEAD behavior unchanged for public static assets', async () => {
+    const { baseUrl } = await launch()
+
+    const response = await fetch(`${baseUrl}/login`, { method: 'HEAD' })
+
+    expect(response.status).toBe(200)
+    expect(await response.text()).toBe('')
+  })
+
+  it('still requires authentication for PUT/DELETE on a protected path, before the request ever reaches the router', async () => {
+    const { baseUrl } = await launch()
+
+    const put = await fetch(`${baseUrl}/api/dashboard`, { method: 'PUT' })
+    expect(put.status).toBe(401)
+
+    const del = await fetch(`${baseUrl}/api/dashboard`, { method: 'DELETE' })
+    expect(del.status).toBe(401)
+  })
+
+  it('returns 401, not 405, for an unsupported method on a protected path without a session -- auth runs before the method check', async () => {
+    const { baseUrl } = await launch()
+
+    const response = await fetch(`${baseUrl}/api/dashboard`, { method: 'PATCH' })
+
+    expect(response.status).toBe(401)
+  })
+
+  it('leaves existing GET and POST routes working exactly as before', async () => {
+    const { baseUrl } = await launch()
+    const { cookie } = await postLogin(baseUrl, 'correct-password')
+
+    const get = await fetch(`${baseUrl}/api/instances`, { headers: { Cookie: cookie } })
+    expect(get.status).toBe(200)
+
+    const post = await fetch(`${baseUrl}/api/logout`, { method: 'POST', headers: { Cookie: cookie } })
+    expect(post.status).toBe(204)
+  })
+})
+
 interface LaunchOptions {
   maxAttempts?: number
   lockoutMs?: number
@@ -302,7 +395,8 @@ function fakeHandle(): IBotInstanceHandle {
     username: 'AlphaBot',
     auth: 'offline',
     commandPrefix: '!',
-    admins: []
+    admins: [],
+    autoConnect: true
   }
   const snapshot: BotInstanceSnapshot = {
     id: config.id,
@@ -324,7 +418,9 @@ function fakeHandle(): IBotInstanceHandle {
     config,
     getStatus: () => snapshot.status,
     getLastError: () => undefined,
-    getSnapshot: () => snapshot
+    getSnapshot: () => snapshot,
+    connect: () => Promise.resolve(),
+    disconnect: () => Promise.resolve()
   }
 }
 

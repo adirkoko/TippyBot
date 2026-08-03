@@ -1,10 +1,20 @@
-# Web dashboard and log viewer
+# Web dashboard, log viewer, and bot management
 
 TippyBot includes a small, dependency-free web server with a dashboard for
-all bot instances and a focused real-time log viewer. It runs in the same
-Node.js process as `BotManager`, serves a vanilla HTML/CSS/JavaScript
-interface, and uses Server-Sent Events (SSE) for live updates. The interface
-is read-only: it cannot send commands to a bot or change bot state.
+all bot instances, a focused real-time log viewer, and a `/bots` page for
+managing instances. It runs in the same Node.js process as `BotManager`,
+serves a vanilla HTML/CSS/JavaScript interface, and uses Server-Sent Events
+(SSE) for live updates on the pages that have them.
+
+**Dashboard and the log viewer are strictly read-only** — neither can send a
+command to a bot or change its state. **`/bots` is the one exception**: it can
+add, edit, delete, connect, disconnect, and restart instances, and it is the
+only page that can. Every one of those actions goes through `BotManager`'s
+own coordinated methods (never a raw `IBotInstanceHandle`) — see
+[multi-instance.md](multi-instance.md#botmanager-instance-lifecycle) — so
+overlapping requests on the same or different instances are always
+serialized correctly, and `bots.config.json` is never written unless the
+in-memory result actually matches it.
 
 ## Starting the server
 
@@ -15,9 +25,10 @@ Open:
 http://<host-running-tippybot>:3000/
 ```
 
-`/` is the multi-instance dashboard. `/logs` is the detailed log viewer. The
-shared navigation switches between them, and selecting a dashboard card opens
-`/logs?instance=<id>` with that instance selected.
+`/` is the multi-instance dashboard, `/logs` is the detailed log viewer, and
+`/bots` manages instances (see [below](#bots-page-instance-management)). The
+shared navigation switches between all three, and selecting a dashboard card
+opens `/logs?instance=<id>` with that instance selected.
 
 The default bind address is `0.0.0.0`, so another device on the same network
 can connect using the host machine's LAN address. Set `WEB_HOST=127.0.0.1` if
@@ -86,8 +97,21 @@ limit is reached, that IP is temporarily blocked for the configured lockout
 period. TippyBot does not trust `X-Forwarded-For` by default; a reverse proxy
 should enforce its own rate limits as well.
 
-Without a valid session, the dashboard, log page, APIs, and SSE streams are
-unavailable. Only the login page and the static assets it needs are public.
+Without a valid session, the dashboard, log page, `/bots` page, every API, and
+every SSE stream are unavailable. Only the login page and the static assets it
+needs are public.
+
+**The shared password is a single privilege tier.** There is no separate,
+higher-privilege credential for `/bots` — the same session that can view logs
+can also add, edit, delete, connect, disconnect, and restart every configured
+instance. This is a deliberate scope increase from a read-only interface: a
+leaked or guessed `WEB_PASSWORD` now grants full control over bot instances,
+not just visibility into them. It does not introduce a new attack surface
+beyond that scope increase (the same session cookie, `SameSite=Strict`,
+timing-safe password check, and per-IP lockout protect all three pages
+equally) — but it does mean `WEB_PASSWORD` should be treated with the same
+care as any other credential that can act on your Minecraft accounts and
+servers.
 
 ## Dashboard
 
@@ -150,6 +174,64 @@ directory. Crossing `LOG_DISK_WARN_MB` creates a `warn` record in the
 `storage` category, visible in the same log page. This is an alert only; no
 automatic deletion occurs.
 
+## `/bots` page: instance management
+
+`/bots` lists every instance `BotManager` knows about and is the only page
+that can change one. It loads `GET /api/bots` once and re-fetches the full
+list after every action completes (success or failure) — there is no SSE
+stream for this page yet; status changes made from *outside* `/bots` (a
+crash, a manual restart from the API, another browser tab) only become
+visible on the next load or manual retry. Adding SSE here later, matching the
+Dashboard's pattern, is a natural follow-up if that gap matters in practice.
+
+**List columns**: `id`, status (including `disconnected`, styled distinctly
+from the other four statuses), `host:port`, `username`, `auth`, and
+`autoConnect`. A truncated, already-redacted `lastError` is shown under the
+`id` when present, with the full (still redacted) message in a tooltip. The
+page has its own loading, empty, and load-error states (with a retry button),
+independent of Dashboard/Logs.
+
+**Add / Edit** open the same dialog, populated from the current row when
+editing. All of `IBotConfig`'s fields are editable: `id`, `host`, `port`,
+`username`, `auth`, `commandPrefix`, `admins` (comma-separated in the UI,
+split and normalized by `normalizeAdminList` on the server exactly like
+`bots.config.json`), `profilesFolder`, and `autoConnect`. **`id` cannot be
+changed** — the field is disabled while editing, and the server rejects a
+body whose `id` disagrees with the URL's `:id` with `400` before validation
+even runs (see [routes/bots.ts](../src/web/routes/bots.ts)). Changing `auth`
+between `microsoft` and `offline` shows a non-blocking inline warning: the
+existing `auth_cache/<id>/` tokens are not deleted and may be orphaned or
+need a fresh device-code login.
+
+**Connect / Disconnect / Restart** buttons are enabled based on the row's
+current status: Connect is disabled while already connecting/online/
+reconnecting, Disconnect is disabled while already disconnected/errored, and
+Restart is always enabled (it works from any status, including `errored`).
+Every action button for a row is disabled for the duration of any request
+already in flight for that instance — including a second click on the same
+button — so a double-click can never send the same request twice or race two
+different actions against each other.
+
+**Delete** opens a confirm dialog naming the instance and stating plainly
+that its `data/`, `logs/`, and `auth_cache/` directories are **not** deleted
+— only its entry in `bots.config.json` is removed, after it's disconnected.
+See [multi-instance.md](multi-instance.md#botmanager-instance-lifecycle) for
+why that ordering (disconnect, then save, then forget) is safe under a
+failure at any step.
+
+**Errors** (`400` validation, `404` unknown id, `409` invalid for the current
+state) are read from the JSON error body and shown without a page reload:
+inline in the Add/Edit dialog (which stays open so the input can be
+corrected) for form submissions, or as a toast for the quick actions
+(connect/disconnect/restart/delete). No response ever includes anything
+beyond `BotSummary`'s fixed field list — never an auth token, never
+`auth_cache` file content; `auth` itself is only ever the mode string
+`'microsoft' | 'offline'`, not a credential.
+
+Every render on this page — table rows, error messages, dialog content —
+uses `textContent`/`createElement`, the same as Dashboard and Logs; nothing
+ever goes through `innerHTML` with server- or user-supplied data.
+
 ## HTTP API
 
 All endpoints below except login require the session cookie:
@@ -163,9 +245,21 @@ All endpoints below except login require the session cookie:
 | `GET /api/instances` | Return the instances known to `BotManager`. |
 | `GET /api/logs/:id?limit=&before=` | Read a page of history; `before` is the opaque cursor returned by the previous page. |
 | `GET /api/logs/:id/stream` | Stream new redacted records as SSE. |
+| `GET /api/bots` | Return `{ instances: BotSummary[] }` — config fields plus current status for every instance. |
+| `POST /api/bots` | Create a new instance. `201` with the created `BotSummary`, `400` on validation failure, `409` on a duplicate `id`. |
+| `PUT /api/bots/:id` | Replace an instance's config. `200` with the updated `BotSummary`, `400` (including an `id` change), `404` if unknown. |
+| `DELETE /api/bots/:id` | Disconnect (if active), remove from `bots.config.json`, and stop its `LogStore` — never deletes `data/`, `logs/`, or `auth_cache/`. `204`, or `404` if unknown. |
+| `POST /api/bots/:id/connect` | `200` with the updated `BotSummary`, `404` if unknown, `409` if already connecting/online/reconnecting. |
+| `POST /api/bots/:id/disconnect` | `200` with the updated `BotSummary`, `404` if unknown, `409` if already disconnected/errored. |
+| `POST /api/bots/:id/restart` | Disconnects first only if active, then connects; works from any status. `200` with the updated `BotSummary`, `404` if unknown. |
 
-The web layer receives read-only snapshots and `LogStore` access. It never
-receives a Mineflayer `Bot` or `IBotContext` and exposes no bot-control route.
+Dashboard's and the log viewer's routes receive read-only snapshots and
+`LogStore` access and never receive a Mineflayer `Bot` or `IBotContext`. The
+`/bots` routes are the only ones that can change instance state, and they do
+so exclusively through `BotManager`'s `addInstance`/`removeInstance`/
+`updateInstance`/`connectInstance`/`disconnectInstance`/`restartInstance` —
+never a raw handle, never mineflayer directly (see
+[src/web/routes/bots.ts](../src/web/routes/bots.ts)).
 
 ## Live smoke checklist
 
@@ -206,5 +300,38 @@ password is not removed accidentally.
    `LOG_DISK_CHECK_INTERVAL_MS`, create enough test log data to cross the
    threshold, and confirm one `warn`/`storage` record appears without deleting
    history. Restore production values afterwards.
+12. Configure at least two instances in `bots.config.json`, one with
+   `autoConnect: true` and one with `autoConnect: false` (or omitted, to also
+   cover the default). Start the process and confirm on `/bots` (and via
+   `GET /api/bots`) that the `true` instance is connecting/online/reconnecting
+   while the `false` instance stays `disconnected` and never attempts a
+   connection on its own.
+13. From `/bots`: add a new instance (with admins as a comma-separated list),
+   confirm it appears immediately after the action completes and that
+   `bots.config.json` gained it; edit an existing instance's `host`/`port` and
+   confirm it reconnects to the new target only if it was already
+   connected; attempt to edit its `id` and confirm the field is disabled and a
+   same-`id` submission is required; change `auth` between `microsoft` and
+   `offline` and confirm the non-blocking warning appears/disappears correctly.
+14. Manually connect, disconnect, and restart an instance from `/bots` and
+   confirm the status and button enabled/disabled state update correctly
+   after each; double-click an action button and confirm only one request is
+   sent (no duplicate connect/disconnect, no duplicate instance on Add).
+15. Delete an instance from `/bots` via the confirm dialog and confirm: the
+   dialog names the instance and states data/logs/auth_cache are not
+   deleted; the instance disappears from the list and `bots.config.json`;
+   its `data/<id>/`, `logs/<id>/`, and `auth_cache/<id>/` directories are
+   still present on disk afterward.
+16. Trigger each error class from `/bots` and confirm it displays without a
+   page reload: `400` (e.g. an invalid port or a malformed admin username),
+   `404` (act on an id that was just deleted in another tab), `409` (connect
+   an already-connecting instance, or add a duplicate `id`).
+17. Restart the whole process (or `docker compose restart` — see
+   [docker.md](docker.md)) after making changes from `/bots`, and confirm
+   every add/edit/delete survived the restart and each instance's
+   `autoConnect` value is respected on the fresh boot.
+18. Confirm Dashboard and Logs still expose no management action anywhere —
+   only `/bots` does — and that the `Bots` nav link is present and correct on
+   all three pages.
 
 The automated equivalents run with `npx vitest run`; see [testing.md](testing.md).

@@ -8,8 +8,10 @@ import { requireAuth } from './auth/requireAuth'
 import { SessionStore, type SessionStoreOptions } from './auth/session'
 import { HttpError, Router, sendJson, setSecurityHeaders } from './router'
 import { registerAuthRoutes } from './routes/auth'
+import { registerBotRoutes, type BotManagementRegistry } from './routes/bots'
 import { registerDashboardRoutes } from './routes/dashboard'
-import { registerLogRoutes, type BotInstanceRegistry, type LogStoreView } from './routes/logs'
+import { registerLogRoutes, type LogStoreView } from './routes/logs'
+import type { LogStore } from '../core/log-store'
 
 const PUBLIC_FILES = new Map<string, PublicFile>([
   ['/', { name: 'dashboard.html', protected: true, contentType: 'text/html; charset=utf-8' }],
@@ -22,6 +24,11 @@ const PUBLIC_FILES = new Map<string, PublicFile>([
     '/logs.html',
     { name: 'logs.html', protected: true, contentType: 'text/html; charset=utf-8' }
   ],
+  ['/bots', { name: 'bots.html', protected: true, contentType: 'text/html; charset=utf-8' }],
+  [
+    '/bots.html',
+    { name: 'bots.html', protected: true, contentType: 'text/html; charset=utf-8' }
+  ],
   ['/login', { name: 'login.html', protected: false, contentType: 'text/html; charset=utf-8' }],
   ['/login.html', { name: 'login.html', protected: false, contentType: 'text/html; charset=utf-8' }],
   ['/styles.css', { name: 'styles.css', protected: false, contentType: 'text/css; charset=utf-8' }],
@@ -32,14 +39,27 @@ const PUBLIC_FILES = new Map<string, PublicFile>([
 ])
 
 interface PublicFile {
-  name: 'dashboard.html' | 'logs.html' | 'login.html' | 'styles.css' | 'app.js'
+  name: 'dashboard.html' | 'logs.html' | 'bots.html' | 'login.html' | 'styles.css' | 'app.js'
   protected: boolean
   contentType: string
 }
 
+/**
+ * Methods the Router is ever asked to match. HEAD is deliberately excluded --
+ * it's handled separately, only for static public files (see
+ * servePublicFile) -- and OPTIONS is not handled at all, falling through to
+ * the 405 branch below like any other unrecognized method, unless a future
+ * change decides otherwise.
+ */
+const ROUTABLE_METHODS = new Set(['GET', 'POST', 'PUT', 'DELETE'])
+/** Methods this server recognizes at all, for the Allow header / 405 decision. */
+const SUPPORTED_METHODS = ['GET', 'HEAD', 'POST', 'PUT', 'DELETE']
+
 export interface WebServerOptions {
-  manager: BotInstanceRegistry
+  manager: BotManagementRegistry
   getLogStore(instanceId: string): LogStoreView | undefined
+  /** Builds a fresh LogStore for a newly created instance (see POST /api/bots in routes/bots.ts). */
+  createLogStore(instanceId: string): LogStore
   password: string
   sessions?: SessionStore
   rateLimiter?: LoginRateLimiter
@@ -84,6 +104,11 @@ export function createWebServer(options: WebServerOptions): Server {
     isAuthenticated: (request) => sessions.isAuthenticated(request),
     intervalMs: options.dashboardIntervalMs,
     heartbeatMs: options.sseHeartbeatMs
+  })
+  registerBotRoutes(router, {
+    manager: options.manager,
+    createLogStore: options.createLogStore,
+    maxBodyBytes: options.maxBodyBytes
   })
 
   const server = createServer((request, response) => {
@@ -159,7 +184,7 @@ async function handleRequest(
     return
   }
 
-  if (method === 'GET' || method === 'POST') {
+  if (ROUTABLE_METHODS.has(method)) {
     const handled = await router.handle(request, response)
     if (handled) return
   }
@@ -169,8 +194,8 @@ async function handleRequest(
     return
   }
 
-  if (!['GET', 'HEAD', 'POST'].includes(method)) {
-    response.setHeader('Allow', 'GET, HEAD, POST')
+  if (!SUPPORTED_METHODS.includes(method)) {
+    response.setHeader('Allow', SUPPORTED_METHODS.join(', '))
     sendJson(response, 405, { error: 'Method not allowed' })
     return
   }
@@ -229,7 +254,7 @@ function findPublicDirectory(): string {
     path.resolve(__dirname, '../../src/web/public'),
     path.resolve(process.cwd(), 'src/web/public')
   ]
-  const requiredFiles = ['dashboard.html', 'logs.html', 'login.html', 'styles.css', 'app.js']
+  const requiredFiles = ['dashboard.html', 'logs.html', 'bots.html', 'login.html', 'styles.css', 'app.js']
   return candidates.find((candidate) =>
     requiredFiles.every((file) => existsSync(path.join(candidate, file)))
   ) ?? candidates[0]

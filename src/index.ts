@@ -4,7 +4,7 @@ import 'dotenv/config' // Load process-wide bot/web/log settings from .env befor
 import { BotManager } from './core/bot-manager'
 import { startBot } from './core/bot'
 import { LogStore } from './core/log-store'
-import { loadBotInstances } from './config/instances'
+import { loadBotInstances, resolveConfigPath } from './config/instances'
 import { loadWebConfig } from './config/webConfig'
 import { ensureWebPassword } from './web/setup/ensureWebPassword'
 import { startWebServer } from './web/server'
@@ -42,19 +42,17 @@ async function main(): Promise<void> {
     return
   }
 
+  const createLogStore = (instanceId: string): LogStore =>
+    new LogStore({
+      instanceId,
+      diskWarnMb: webConfig.logDiskWarnMb,
+      diskCheckIntervalMs: webConfig.logDiskCheckIntervalMs
+    })
+
   // BotManager.startAll() never throws -- a failed instance shows up as an
   // 'errored' handle (see src/core/bot.ts), so one bad connection never
   // takes down the others, even though they're all running in this one process.
-  const logStores = new Map(
-    configs.map((config) => [
-      config.id,
-      new LogStore({
-        instanceId: config.id,
-        diskWarnMb: webConfig.logDiskWarnMb,
-        diskCheckIntervalMs: webConfig.logDiskCheckIntervalMs
-      })
-    ])
-  )
+  const logStores = new Map(configs.map((config) => [config.id, createLogStore(config.id)]))
 
   try {
     await Promise.all([...logStores.values()].map((store) => store.ready()))
@@ -65,7 +63,7 @@ async function main(): Promise<void> {
     return
   }
 
-  const manager = new BotManager(configs, startBot, logStores)
+  const manager = new BotManager(configs, startBot, logStores, resolveConfigPath())
   manager.startAll()
 
   if (!webConfig.enabled) {
@@ -77,6 +75,7 @@ async function main(): Promise<void> {
     await startWebServer({
       manager,
       getLogStore: (instanceId) => manager.getLogStore(instanceId),
+      createLogStore,
       password: webConfig.password,
       secureCookies: webConfig.secureCookies,
       dashboardIntervalMs: webConfig.dashboardIntervalMs,

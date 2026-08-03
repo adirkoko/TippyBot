@@ -21,3 +21,17 @@ export function homesFilePath(instanceId: string): string {
 export function defaultProfilesFolder(instanceId: string): string {
   return `./auth_cache/${instanceId}`
 }
+
+/**
+ * Whether a custom `profilesFolder` is safe to use as-is: a relative path
+ * that can't escape the project directory tree. Rejects absolute paths (both
+ * POSIX and Windows drive-letter/UNC forms) and any ".." segment. This is
+ * only relevant for a user-supplied override -- `defaultProfilesFolder`
+ * always produces a safe value on its own.
+ */
+export function isSafeRelativeFolder(value: string): boolean {
+  if (!value) return false
+  if (value.startsWith('/') || value.startsWith('\\')) return false
+  if (/^[A-Za-z]:[\\/]/.test(value)) return false
+  return !value.split(/[\\/]+/).includes('..')
+}

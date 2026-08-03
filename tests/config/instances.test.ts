@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { promises as fs } from 'fs'
 import * as os from 'os'
 import * as path from 'path'
-import { loadBotInstances } from '../../src/config/instances'
+import { loadBotInstances, saveBotInstances, validateInstance } from '../../src/config/instances'
 
 let tmpDir: string
 let configPath: string
@@ -43,7 +43,8 @@ describe('loadBotInstances', () => {
           auth: 'microsoft',
           commandPrefix: '!',
           admins: ['playerone'],
-          profilesFolder: './auth_cache/steve'
+          profilesFolder: './auth_cache/steve',
+          autoConnect: true
         }
       ])
     })
@@ -74,6 +75,14 @@ describe('loadBotInstances', () => {
 
     expect(configs[0].profilesFolder).toBe('./custom/profiles')
     expect(configs[0].commandPrefix).toBe('?')
+  })
+
+  it('rejects an absolute or traversal-escaping profilesFolder', async () => {
+    await writeConfig({
+      instances: [{ ...validInstance, profilesFolder: '../../etc' }]
+    })
+
+    expect(() => loadBotInstances(configPath)).toThrow(/"profilesFolder"/)
   })
 
   it('throws a clear error when the file does not exist', () => {
@@ -135,5 +144,115 @@ describe('loadBotInstances', () => {
     })
 
     expect(() => loadBotInstances(configPath)).toThrow(/duplicate instance id/)
+  })
+
+  describe('autoConnect backward compatibility', () => {
+    it('defaults to true when the field is absent, for configs written before it existed', async () => {
+      await writeConfig({ instances: [validInstance] })
+
+      const configs = loadBotInstances(configPath)
+
+      expect(configs[0].autoConnect).toBe(true)
+    })
+
+    it('respects an explicit autoConnect: false', async () => {
+      await writeConfig({ instances: [{ ...validInstance, autoConnect: false }] })
+
+      const configs = loadBotInstances(configPath)
+
+      expect(configs[0].autoConnect).toBe(false)
+    })
+
+    it('respects an explicit autoConnect: true', async () => {
+      await writeConfig({ instances: [{ ...validInstance, autoConnect: true }] })
+
+      const configs = loadBotInstances(configPath)
+
+      expect(configs[0].autoConnect).toBe(true)
+    })
+
+    it('throws when autoConnect is not a boolean', async () => {
+      await writeConfig({ instances: [{ ...validInstance, autoConnect: 'yes' }] })
+
+      expect(() => loadBotInstances(configPath)).toThrow(/"autoConnect"/)
+    })
+  })
+})
+
+describe('validateInstance', () => {
+  it('is reusable with a caller-supplied label, independent of array position', () => {
+    expect(() => validateInstance({ ...validInstance, id: 'bad id!' }, 'New bot instance')).toThrow(
+      /New bot instance: "id"/
+    )
+  })
+
+  it('returns a fully-resolved IBotConfig including defaults', () => {
+    const config = validateInstance(validInstance, 'New bot instance')
+
+    expect(config).toEqual({
+      id: 'steve',
+      host: 'play.example.com',
+      port: 25565,
+      username: 'SteveBot',
+      auth: 'microsoft',
+      commandPrefix: '!',
+      admins: ['playerone'],
+      profilesFolder: './auth_cache/steve',
+      autoConnect: true
+    })
+  })
+})
+
+describe('saveBotInstances', () => {
+  it('writes a file that loadBotInstances can read back identically', async () => {
+    const configs = [
+      validateInstance(validInstance, 'New bot instance'),
+      validateInstance(
+        { id: 'alex', host: 'other.example.com', port: 25565, username: 'AlexBot', auth: 'offline', autoConnect: false },
+        'New bot instance'
+      )
+    ]
+
+    await saveBotInstances(configs, configPath)
+    const loaded = loadBotInstances(configPath)
+
+    expect(loaded).toEqual(configs)
+  })
+
+  it('does not leave a temp file behind after a successful save', async () => {
+    await saveBotInstances([validateInstance(validInstance, 'New bot instance')], configPath)
+
+    const entries = await fs.readdir(path.dirname(configPath))
+    const tmpFiles = entries.filter((name) => name.includes('.tmp'))
+    expect(tmpFiles).toEqual([])
+  })
+
+  it('overwrites the full instance list rather than merging', async () => {
+    const first = [validateInstance(validInstance, 'New bot instance')]
+    const second = [
+      validateInstance(
+        { id: 'alex', host: 'other.example.com', port: 25565, username: 'AlexBot', auth: 'offline' },
+        'New bot instance'
+      )
+    ]
+
+    await saveBotInstances(first, configPath)
+    await saveBotInstances(second, configPath)
+
+    expect(loadBotInstances(configPath).map((c) => c.id)).toEqual(['alex'])
+  })
+
+  it('rejects without writing when the target path cannot be created, leaving any existing file untouched', async () => {
+    const original = [validateInstance(validInstance, 'New bot instance')]
+    await saveBotInstances(original, configPath)
+
+    // A file occupying the path where a directory needs to be created makes
+    // the underlying mkdir fail -- nothing about the existing config file
+    // should change as a result.
+    const blockedPath = path.join(tmpDir, 'not-a-directory', 'bots.config.json')
+    await fs.writeFile(path.join(tmpDir, 'not-a-directory'), 'not a directory', 'utf8')
+
+    await expect(saveBotInstances(original, blockedPath)).rejects.toThrow()
+    expect(loadBotInstances(configPath)).toEqual(original)
   })
 })

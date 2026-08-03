@@ -4,25 +4,25 @@
 
 | Path | Responsibility |
 |---|---|
-| `src/core` | Bot creation and lifecycle (incl. reconnection), action/command registries, coordination services, persistence helpers, and per-instance log storage |
+| `src/core` | Bot creation and lifecycle (incl. reconnection, connect/disconnect), `BotManager`'s instance-lifecycle CRUD, typed lifecycle errors, action/command registries, coordination services, persistence helpers, and per-instance log storage |
 | `src/interfaces` | TypeScript contracts shared across the framework (`IModule`, `IAction`, `ICommand`, `IBotContext`, ...) |
 | `src/modules` | Self-contained feature plugins (see [modules.md](modules.md)) |
 | `src/utils` | Small, stateless helpers shared across layers, including central log redaction |
-| `src/config` | Loads and validates bot, web, and log settings and safely updates `.env` |
-| `src/web` | Dependency-free HTTP server/router, general auth, read-only dashboard/log APIs and SSE routes, and the vanilla frontend |
+| `src/config` | Loads, validates, and atomically saves `bots.config.json`; loads and validates web/log settings; safely updates `.env` |
+| `src/web` | Dependency-free HTTP server/router, general auth, the read-only dashboard/log APIs and SSE routes, the `/bots` instance-management API, and the vanilla frontend |
 
 ## Boot flow
 
 TippyBot can run multiple independent bot instances from one process, coordinated by `BotManager` — see [multi-instance.md](multi-instance.md) for the full picture. The flow below is per-instance; `BotManager.startAll()` runs it once for every instance in `bots.config.json`.
 
 1. `src/index.ts` loads `.env`, ensures a one-time `WEB_PASSWORD` exists without passing it through logging, validates the process-wide web/log settings, and calls `loadBotInstances()` ([src/config/instances.ts](../src/config/instances.ts)).
-2. One `LogStore` is created for every configured instance and supplied to `BotManager`. `BotManager.startAll()` passes the matching store into `startBot(config, logStore)`, keeps each returned `IBotInstanceHandle` keyed by `id`, and exposes read-only handle/store lookup to the web log surface.
-3. `startBot` ([src/core/bot.ts](../src/core/bot.ts)) returns that handle immediately and continues setup in the background: it constructs the services scoped to that instance's entire lifetime — `ActionRegistry`, `CommandRegistry`, `PathfinderLock`, `PermissionService`, `TaskManager`, `CooldownService`, `HomeService` — and awaits `PermissionService.load()` / `HomeService.load()` before anything else touches chat. All of this is local to that one call, so nothing is shared between instances. If this setup throws (e.g. a corrupt permissions file on disk), it's caught here and surfaced as an `'errored'` status on the handle rather than crashing the process.
-4. It then calls an internal `connect()` function that creates the mineflayer `bot`, loads the `pathfinder` plugin, and bundles everything into a single `IBotContext` (`ctx`) — the one object threaded through the entire framework. `ctx` itself is kept internal to `bot.ts`; the handle's `getSnapshot()` starts reflecting live values (ping, health, food, position, dimension, active task) pulled from it once the instance is `'online'` — see [multi-instance.md](multi-instance.md#botinstancehandle-one-api-surface-for-every-instance).
+2. One `LogStore` is created for every configured instance and supplied to `BotManager`. `BotManager.startAll()` passes the matching store into `startBot(config, logStore)`, keeps each returned `IBotInstanceHandle` keyed by `id`, and exposes handle/store lookup plus instance-lifecycle control to the web surface (see step 8 and [multi-instance.md](multi-instance.md#botmanager-instance-lifecycle)).
+3. `startBot` ([src/core/bot.ts](../src/core/bot.ts)) returns that handle immediately **without connecting it** — it constructs the services scoped to that instance's entire lifetime (`ActionRegistry`, `CommandRegistry`, `PathfinderLock`, `PermissionService`, `TaskManager`, `CooldownService`, `HomeService`) only once something calls `connect()` on it. `BotManager.startAll()` calls `connect()` right after creating the handle, unless the instance's `autoConnect` is `false` — in which case it stays `'disconnected'` until the `/bots` page (or a future caller) connects it explicitly.
+4. `connect()` awaits `PermissionService.load()` / `HomeService.load()` before anything else touches chat, then creates the mineflayer `bot`, loads the `pathfinder` plugin, and bundles everything into a single `IBotContext` (`ctx`) — the one object threaded through the entire framework. All of this is local to that one call, so nothing is shared between instances. If setup throws (e.g. a corrupt permissions file on disk), it's caught and surfaced as an `'errored'` status on the handle rather than crashing the process. `ctx` itself is kept internal to `bot.ts`; the handle's `getSnapshot()` starts reflecting live values (ping, health, food, position, dimension, active task) pulled from it once the instance is `'online'` — see [multi-instance.md](multi-instance.md#botinstancehandle-one-api-surface-for-every-instance).
 5. `connect()` wires `bot.on('chat', ...)` to `commands.handleChatMessage`, wires `end`/`death` to `ctx.tasks.abort(...)` (see [tasks.md](tasks.md)), then calls `init(ctx)` on every module listed in [src/modules/index.ts](../src/modules/index.ts).
 6. Each module registers its actions and commands against `ctx.actions` / `ctx.commands` during `init`. From then on, the registries — not the modules themselves — own how a chat message turns into behavior.
-7. The handle's status moves `'connecting'` → `'online'` on `bot`'s `login` event, and back to `'reconnecting'` on `end`. If the connection drops, `connect()` runs again on a backoff schedule — see [tasks.md](tasks.md#reconnection). `bot` (and therefore `ctx`) is recreated per connection attempt; the services from step 3 persist across reconnects.
-8. After `manager.startAll()`, the authenticated HTTP server starts unless `WEB_ENABLED=false`. The dashboard reads `getSnapshot()` for every instance, while the log viewer reads the matching `LogStore`; neither receives a Mineflayer `Bot` or `IBotContext`, and no control operations are exposed. See [web.md](web.md).
+7. The handle's status moves `'connecting'` → `'online'` on `bot`'s `login` event, and back to `'reconnecting'` on `end` (or to `'disconnected'`, with no further retries, if the disconnect was requested through `BotManager` rather than caused by a dropped connection). If the connection drops unexpectedly, `connect()` runs again on a backoff schedule — see [tasks.md](tasks.md#reconnection). `bot` (and therefore `ctx`) is recreated per connection attempt; the services from step 4 are rebuilt fresh on every `connect()`, including a manual reconnect after a disconnect.
+8. After `manager.startAll()`, the authenticated HTTP server starts unless `WEB_ENABLED=false`. Three pages share it: the Dashboard and the log viewer are **read-only** (they read `getSnapshot()` and the matching `LogStore`, and never receive a Mineflayer `Bot` or `IBotContext`); `/bots` is the **one** page with management actions (add/edit/delete/connect/disconnect/restart), and even it never touches a raw handle -- every action goes through `BotManager`'s own coordinated methods. See [web.md](web.md).
 
 ## `IBotContext`
 
@@ -91,7 +91,7 @@ Both `JsonPermissionStore` and `JsonHomeStore` are now thin wrappers around a sh
 
 Each saved home records the dimension it was set in alongside the coordinates. `!home` compares that against the bot's *current* dimension and refuses to walk if they differ, rather than attempting (and failing) to path across a dimension boundary — see [commands.md](commands.md) for the exact message.
 
-## Categorized logging and the web read surface
+## Categorized logging and the web surface
 
 Each configured instance owns a `LogStore` under `logs/<id>/`. The console
 logger is also connected to that store, and `ILogger.withCategory()` binds a
@@ -106,11 +106,15 @@ metadata JSON-safe and redacts sensitive keys and inline credentials before
 the record reaches JSONL, gzip history, subscribers, or SSE. Reads redact
 again to protect the UI from manually imported or older unredacted records.
 
-The web server is deliberately read-only and depends on `BotManager` instance
-snapshots plus per-instance `LogStore` lookup. Authentication, sessions, rate
-limiting, routing, and static-file handling are general web infrastructure so
-future pages can reuse them without coupling to the log page. Full details are
-in [web.md](web.md).
+The Dashboard and log viewer are read-only, depending only on `BotManager`
+instance snapshots and per-instance `LogStore` lookup. The `/bots` page is the
+one exception: it's the sole place any management action (add/edit/delete/
+connect/disconnect/restart) is exposed, and every one of them goes through
+`BotManager`'s own coordinated methods (see
+[multi-instance.md](multi-instance.md#botmanager-instance-lifecycle)) rather
+than a raw handle. Authentication, sessions, rate limiting, routing, and
+static-file handling are general web infrastructure shared by all three
+pages. Full details are in [web.md](web.md).
 
 ## Error handling
 

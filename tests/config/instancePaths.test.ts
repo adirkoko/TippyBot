@@ -3,7 +3,8 @@ import {
   isValidInstanceId,
   permissionsFilePath,
   homesFilePath,
-  defaultProfilesFolder
+  defaultProfilesFolder,
+  isSafeRelativeFolder
 } from '../../src/config/instancePaths'
 
 describe('isValidInstanceId', () => {
@@ -41,5 +42,33 @@ describe('per-instance path helpers', () => {
     expect(permissionsFilePath('steve')).not.toBe(permissionsFilePath('alex'))
     expect(homesFilePath('steve')).not.toBe(homesFilePath('alex'))
     expect(defaultProfilesFolder('steve')).not.toBe(defaultProfilesFolder('alex'))
+  })
+})
+
+describe('isSafeRelativeFolder', () => {
+  it('accepts plain relative paths, including nested ones', () => {
+    expect(isSafeRelativeFolder('./auth_cache/steve')).toBe(true)
+    expect(isSafeRelativeFolder('auth_cache/steve')).toBe(true)
+    expect(isSafeRelativeFolder('custom/nested/profiles')).toBe(true)
+  })
+
+  it('rejects an empty string', () => {
+    expect(isSafeRelativeFolder('')).toBe(false)
+  })
+
+  it('rejects POSIX absolute paths', () => {
+    expect(isSafeRelativeFolder('/etc/passwd')).toBe(false)
+  })
+
+  it('rejects Windows drive-letter and UNC absolute paths', () => {
+    expect(isSafeRelativeFolder('C:\\Windows\\System32')).toBe(false)
+    expect(isSafeRelativeFolder('C:/secrets')).toBe(false)
+    expect(isSafeRelativeFolder('\\\\server\\share')).toBe(false)
+  })
+
+  it('rejects any ".." traversal segment, POSIX or Windows separators', () => {
+    expect(isSafeRelativeFolder('../secrets')).toBe(false)
+    expect(isSafeRelativeFolder('auth_cache/../../etc')).toBe(false)
+    expect(isSafeRelativeFolder('auth_cache\\..\\..\\secrets')).toBe(false)
   })
 })

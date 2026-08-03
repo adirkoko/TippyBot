@@ -22,7 +22,8 @@ Then edit `bots.config.json` with your server and account details. See [multi-in
       "username": "SteveBot",
       "auth": "microsoft",
       "commandPrefix": "!",
-      "admins": ["PlayerOne"]
+      "admins": ["PlayerOne"],
+      "autoConnect": true
     }
   ]
 }
@@ -38,8 +39,17 @@ Then edit `bots.config.json` with your server and account details. See [multi-in
 | `commandPrefix` | no | Chat command prefix, defaults to `!` |
 | `admins` | no | Minecraft usernames granted permanent `Admin` access on this instance. See [Admins](#admins) below |
 | `profilesFolder` | no | Where Microsoft auth tokens are cached, defaults to `./auth_cache/<id>` |
+| `autoConnect` | no | Whether this instance connects automatically at boot (or immediately after being added). **Defaults to `true` when the field is absent** — every `bots.config.json` written before this field existed keeps auto-connecting exactly as before. Set to `false` to keep an instance registered but disconnected until something explicitly connects it (see [multi-instance.md](multi-instance.md#botmanager-instance-lifecycle) and [web.md](web.md#bots-page-instance-management)) |
 
 The whole file is validated at startup — a missing/malformed field, an invalid `id`, or a duplicate `id` across instances fails fast with a specific error rather than starting with bad state. `BOTS_CONFIG_PATH` (in `.env`) can override the config file's location; it defaults to `./bots.config.json`.
+
+The same validation rules apply whether an instance comes from this file at
+boot or from the `/bots` page's Add/Edit forms at runtime — both go through
+`validateInstance()` ([src/config/instances.ts](../src/config/instances.ts)).
+Adding, editing, or removing an instance through `/bots` writes back to this
+same file (atomically) instead of requiring a manual edit; see
+[web.md](web.md#bots-page-instance-management) for what that page can and
+cannot do.
 
 ## Auth modes
 

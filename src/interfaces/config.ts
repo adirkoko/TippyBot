@@ -14,4 +14,7 @@ export interface IBotConfig {
 
   /** Normalized (lowercase) usernames with permanent Admin access; source of truth is bots.config.json, never mutated at runtime. */
   admins: string[]
+
+  /** Whether this instance connects automatically at boot (or when added). Absent in bots.config.json defaults to true. */
+  autoConnect: boolean
 }

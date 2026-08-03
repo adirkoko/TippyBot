@@ -9,6 +9,7 @@
   if (page === 'login') setupLoginPage()
   if (page === 'dashboard') setupDashboardPage()
   if (page === 'logs') setupLogsPage()
+  if (page === 'bots') setupBotsPage()
 
   function setupLoginPage() {
     const form = byId('login-form')
@@ -735,6 +736,335 @@
     }
   }
 
+  function setupBotsPage() {
+    const ACTIVE_STATUSES = ['connecting', 'online', 'reconnecting']
+
+    const elements = {
+      loading: byId('bots-loading'),
+      errorPanel: byId('bots-error'),
+      retry: byId('bots-retry'),
+      empty: byId('bots-empty'),
+      tableWrap: byId('bots-table-wrap'),
+      tableBody: byId('bots-table-body'),
+      summary: byId('bots-summary'),
+      logout: byId('logout-button'),
+      addButton: byId('add-bot-button'),
+      toast: byId('toast'),
+      formDialog: byId('bot-form-dialog'),
+      form: byId('bot-form'),
+      formTitle: byId('bot-form-title'),
+      formError: byId('bot-form-error'),
+      formId: byId('bot-form-id'),
+      formHost: byId('bot-form-host'),
+      formPort: byId('bot-form-port'),
+      formUsername: byId('bot-form-username'),
+      formAuth: byId('bot-form-auth'),
+      formAuthWarning: byId('bot-form-auth-warning'),
+      formPrefix: byId('bot-form-prefix'),
+      formAdmins: byId('bot-form-admins'),
+      formProfiles: byId('bot-form-profiles'),
+      formAutoConnect: byId('bot-form-auto-connect'),
+      formCancel: byId('bot-form-cancel'),
+      formSubmit: byId('bot-form-submit'),
+      deleteDialog: byId('delete-dialog'),
+      deleteDialogId: byId('delete-dialog-id'),
+      deleteCancel: byId('delete-dialog-cancel'),
+      deleteConfirm: byId('delete-dialog-confirm')
+    }
+
+    const state = {
+      pendingIds: new Set(),
+      editingId: undefined,
+      originalAuth: undefined,
+      deleteTargetId: undefined,
+      formSubmitting: false,
+      deleteSubmitting: false,
+      toastTimer: undefined
+    }
+
+    setupLogoutButton(elements.logout)
+    elements.retry.addEventListener('click', () => void loadBots())
+    elements.addButton.addEventListener('click', () => openFormDialog())
+    elements.formCancel.addEventListener('click', () => elements.formDialog.close())
+    elements.form.addEventListener('submit', (event) => void handleFormSubmit(event))
+    elements.formAuth.addEventListener('change', updateAuthWarning)
+    elements.deleteCancel.addEventListener('click', () => elements.deleteDialog.close())
+    elements.deleteConfirm.addEventListener('click', () => void handleDeleteConfirm())
+
+    void loadBots()
+
+    async function loadBots() {
+      showLoadingState()
+      try {
+        const response = await apiFetch('/api/bots')
+        const payload = await parseJson(response)
+        const instances = botInstances(payload)
+        if (!response.ok || !instances) throw new Error('Invalid bots response')
+        renderBots(instances)
+      } catch (error) {
+        if (isAuthRedirect(error)) return
+        showErrorState()
+      }
+    }
+
+    function showLoadingState() {
+      elements.loading.hidden = false
+      elements.errorPanel.hidden = true
+      elements.empty.hidden = true
+      elements.tableWrap.hidden = true
+      elements.summary.textContent = 'טוען מופעים…'
+    }
+
+    function showErrorState() {
+      elements.loading.hidden = true
+      elements.errorPanel.hidden = false
+      elements.empty.hidden = true
+      elements.tableWrap.hidden = true
+      elements.summary.textContent = 'טעינת הרשימה נכשלה.'
+    }
+
+    function renderBots(instances) {
+      state.instances = instances.filter(isBotSummary)
+      elements.loading.hidden = true
+      elements.errorPanel.hidden = true
+
+      if (state.instances.length === 0) {
+        elements.empty.hidden = false
+        elements.tableWrap.hidden = true
+        elements.summary.textContent = 'אין מופעים מוגדרים.'
+        return
+      }
+
+      elements.empty.hidden = true
+      elements.tableWrap.hidden = false
+      elements.summary.textContent = `${state.instances.length} מופעים`
+
+      const fragment = document.createDocumentFragment()
+      for (const instance of state.instances) fragment.append(createBotRow(instance))
+      elements.tableBody.replaceChildren(fragment)
+    }
+
+    function createBotRow(instance) {
+      const status = normalizedStatus(instance.status)
+      const busy = state.pendingIds.has(instance.id)
+      const row = document.createElement('tr')
+      row.className = `bots-row status-${status}`
+
+      const idCell = document.createElement('td')
+      idCell.append(span('bots-id', instance.id))
+      if (isLastError(instance.lastError)) idCell.append(createErrorNote(instance.lastError))
+
+      const statusCell = document.createElement('td')
+      statusCell.append(span(`status-badge status-${status}`, statusLabel(status)))
+
+      const serverCell = document.createElement('td')
+      serverCell.dir = 'ltr'
+      serverCell.textContent = formatEndpoint(instance.host, instance.port)
+
+      const usernameCell = document.createElement('td')
+      usernameCell.textContent = instance.username
+
+      const authCell = document.createElement('td')
+      authCell.textContent = instance.auth === 'microsoft' ? 'Microsoft' : 'Offline'
+
+      const autoConnectCell = document.createElement('td')
+      autoConnectCell.append(
+        span(`bool-badge ${instance.autoConnect ? 'is-yes' : 'is-no'}`, instance.autoConnect ? 'כן' : 'לא')
+      )
+
+      const actionsCell = document.createElement('td')
+      actionsCell.className = 'bots-actions'
+      const isActive = ACTIVE_STATUSES.includes(status)
+
+      actionsCell.append(
+        actionButton('חיבור', busy || isActive, () => runInstanceAction(instance.id, 'connect')),
+        actionButton('ניתוק', busy || !isActive, () => runInstanceAction(instance.id, 'disconnect')),
+        actionButton('הפעלה מחדש', busy, () => runInstanceAction(instance.id, 'restart')),
+        actionButton('עריכה', busy, () => openFormDialog(instance)),
+        actionButton('מחיקה', busy, () => openDeleteDialog(instance), 'danger')
+      )
+
+      row.append(idCell, statusCell, serverCell, usernameCell, authCell, autoConnectCell, actionsCell)
+      return row
+    }
+
+    function actionButton(label, disabled, onClick, kind) {
+      const button = document.createElement('button')
+      button.type = 'button'
+      button.className = `text-button compact${kind === 'danger' ? ' is-danger' : ''}`
+      button.textContent = label
+      button.disabled = disabled
+      button.addEventListener('click', onClick)
+      return button
+    }
+
+    function createErrorNote(lastError) {
+      // lastError.message is already redacted server-side; this truncation
+      // is purely a display concern, not a second safety pass.
+      const note = document.createElement('p')
+      note.className = 'bots-error-note'
+      note.textContent = truncate(lastError.message, 80)
+      if (lastError.message.length > 80) note.title = lastError.message
+      return note
+    }
+
+    // ---- connect / disconnect / restart ----
+
+    async function runInstanceAction(id, action) {
+      if (state.pendingIds.has(id)) return
+      state.pendingIds.add(id)
+      // Immediate visual feedback (disabled row) before the response arrives;
+      // loadBots() below re-fetches and re-renders with the real outcome.
+      if (state.instances) renderBots(state.instances)
+
+      try {
+        const response = await apiFetch(`/api/bots/${encodeURIComponent(id)}/${action}`, { method: 'POST' })
+        const payload = await parseJson(response)
+        if (!response.ok) throw new Error(describeApiError(payload, response.status))
+      } catch (error) {
+        if (!isAuthRedirect(error)) showToast(error.message || 'הפעולה נכשלה.')
+      } finally {
+        state.pendingIds.delete(id)
+        await loadBots()
+      }
+    }
+
+    // ---- add / edit form ----
+
+    function openFormDialog(instance) {
+      state.editingId = instance ? instance.id : undefined
+      state.originalAuth = instance ? instance.auth : undefined
+      elements.formError.textContent = ''
+      elements.formAuthWarning.hidden = true
+
+      elements.formTitle.textContent = instance ? `עריכת מופע "${instance.id}"` : 'הוספת מופע'
+      elements.formId.value = instance ? instance.id : ''
+      elements.formId.disabled = Boolean(instance)
+      elements.formHost.value = instance ? instance.host : ''
+      elements.formPort.value = instance ? String(instance.port) : ''
+      elements.formUsername.value = instance ? instance.username : ''
+      elements.formAuth.value = instance ? instance.auth : 'offline'
+      elements.formPrefix.value = instance ? instance.commandPrefix || '' : ''
+      elements.formAdmins.value = instance && Array.isArray(instance.admins) ? instance.admins.join(', ') : ''
+      elements.formProfiles.value = instance && instance.profilesFolder ? instance.profilesFolder : ''
+      elements.formAutoConnect.checked = instance ? Boolean(instance.autoConnect) : true
+
+      elements.formDialog.showModal()
+      ;(instance ? elements.formHost : elements.formId).focus()
+    }
+
+    function updateAuthWarning() {
+      const changed = state.originalAuth !== undefined && elements.formAuth.value !== state.originalAuth
+      elements.formAuthWarning.hidden = !changed
+    }
+
+    async function handleFormSubmit(event) {
+      event.preventDefault()
+      if (state.formSubmitting) return
+
+      const payload = {
+        id: elements.formId.value.trim(),
+        host: elements.formHost.value.trim(),
+        port: Number(elements.formPort.value),
+        username: elements.formUsername.value.trim(),
+        auth: elements.formAuth.value,
+        commandPrefix: elements.formPrefix.value.trim() || undefined,
+        admins: elements.formAdmins.value.split(',').map((name) => name.trim()).filter(Boolean),
+        profilesFolder: elements.formProfiles.value.trim() || undefined,
+        autoConnect: elements.formAutoConnect.checked
+      }
+
+      const isEdit = state.editingId !== undefined
+      const url = isEdit ? `/api/bots/${encodeURIComponent(state.editingId)}` : '/api/bots'
+
+      state.formSubmitting = true
+      elements.formSubmit.disabled = true
+      elements.formSubmit.textContent = 'שומר…'
+      elements.formError.textContent = ''
+
+      try {
+        const response = await apiFetch(url, {
+          method: isEdit ? 'PUT' : 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        })
+        const body = await parseJson(response)
+        if (!response.ok) throw new Error(describeApiError(body, response.status))
+
+        elements.formDialog.close()
+        showToast(isEdit ? 'המופע עודכן.' : 'המופע נוסף.')
+        await loadBots()
+      } catch (error) {
+        if (isAuthRedirect(error)) return
+        elements.formError.textContent = error.message || 'השמירה נכשלה.'
+      } finally {
+        state.formSubmitting = false
+        elements.formSubmit.disabled = false
+        elements.formSubmit.textContent = 'שמירה'
+      }
+    }
+
+    // ---- delete ----
+
+    function openDeleteDialog(instance) {
+      state.deleteTargetId = instance.id
+      elements.deleteDialogId.textContent = instance.id
+      elements.deleteConfirm.disabled = false
+      elements.deleteConfirm.textContent = 'מחיקה'
+      elements.deleteDialog.showModal()
+    }
+
+    async function handleDeleteConfirm() {
+      if (state.deleteSubmitting || !state.deleteTargetId) return
+      const id = state.deleteTargetId
+
+      state.deleteSubmitting = true
+      elements.deleteConfirm.disabled = true
+      elements.deleteConfirm.textContent = 'מוחק…'
+
+      try {
+        const response = await apiFetch(`/api/bots/${encodeURIComponent(id)}`, { method: 'DELETE' })
+        if (!response.ok && response.status !== 204) {
+          const body = await parseJson(response)
+          throw new Error(describeApiError(body, response.status))
+        }
+        elements.deleteDialog.close()
+        showToast(`המופע "${id}" נמחק.`)
+      } catch (error) {
+        if (!isAuthRedirect(error)) {
+          elements.deleteDialog.close()
+          showToast(error.message || 'המחיקה נכשלה.')
+        }
+      } finally {
+        state.deleteSubmitting = false
+        state.deleteTargetId = undefined
+        elements.deleteConfirm.disabled = false
+        elements.deleteConfirm.textContent = 'מחיקה'
+        // Refresh even on failure: a 404 here usually means another tab
+        // already deleted (or renamed) this instance, and the table must
+        // stop showing it rather than leaving a stale, now-illegal row.
+        await loadBots()
+      }
+    }
+
+    // ---- shared helpers ----
+
+    function describeApiError(body, status) {
+      if (body && typeof body.error === 'string' && body.error) return body.error
+      if (status === 400) return 'הבקשה אינה תקינה.'
+      if (status === 404) return 'המופע לא נמצא.'
+      if (status === 409) return 'הפעולה לא אפשרית במצב הנוכחי.'
+      return 'אירעה שגיאה. נסו שוב.'
+    }
+
+    function showToast(message) {
+      elements.toast.textContent = message
+      elements.toast.classList.add('is-visible')
+      window.clearTimeout(state.toastTimer)
+      state.toastTimer = window.setTimeout(() => elements.toast.classList.remove('is-visible'), 3200)
+    }
+  }
+
   function setupLogoutButton(button) {
     button.addEventListener('click', async () => {
       button.disabled = true
@@ -764,6 +1094,31 @@
       typeof value.status === 'string'
   }
 
+  function botInstances(payload) {
+    if (Array.isArray(payload)) return payload
+    if (payload && typeof payload === 'object' && Array.isArray(payload.instances)) {
+      return payload.instances
+    }
+    return null
+  }
+
+  function isBotSummary(value) {
+    return Boolean(value) &&
+      typeof value === 'object' &&
+      typeof value.id === 'string' &&
+      typeof value.host === 'string' &&
+      Number.isFinite(value.port) &&
+      typeof value.username === 'string' &&
+      typeof value.auth === 'string' &&
+      typeof value.status === 'string' &&
+      typeof value.autoConnect === 'boolean'
+  }
+
+  function truncate(text, maxLength) {
+    if (typeof text !== 'string') return ''
+    return text.length > maxLength ? `${text.slice(0, maxLength)}…` : text
+  }
+
   function isActiveTask(value) {
     return Boolean(value) &&
       typeof value === 'object' &&
@@ -780,7 +1135,7 @@
   }
 
   function normalizedStatus(status) {
-    return ['connecting', 'online', 'reconnecting', 'errored'].includes(status)
+    return ['disconnected', 'connecting', 'online', 'reconnecting', 'errored'].includes(status)
       ? status
       : 'unknown'
   }
@@ -918,6 +1273,7 @@
 
   function statusLabel(status) {
     const labels = {
+      disconnected: 'מנותק',
       connecting: 'מתחבר',
       online: 'מחובר',
       reconnecting: 'מתחבר מחדש',
