@@ -8,6 +8,7 @@ For a deeper look at how it's put together, see the docs:
 * [docs/modules.md](docs/modules.md) — built-in modules and how to write your own
 * [docs/commands.md](docs/commands.md) — the full command reference: syntax, permission level, arguments, limits, examples
 * [docs/permissions.md](docs/permissions.md) — permission levels, Admin config, and custom access groups
+* [docs/tasks.md](docs/tasks.md) — the active-task model, `!status`/`!cancel`, and reconnect/disconnect handling
 * [docs/configuration.md](docs/configuration.md) — environment variables, auth modes, and chat signing
 * [docs/testing.md](docs/testing.md) — running and writing tests
 

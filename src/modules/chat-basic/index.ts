@@ -29,6 +29,7 @@ const chatBasicModule: IModule = {
       description: 'Simple ping command to test the bot',
       usage: '!ping',
       requiredLevel: 'user',
+      params: [],
       async execute({ ctx, username }) {
         ctx.bot.chat(`Pong, ${username}!`)
       }
@@ -42,6 +43,7 @@ const chatBasicModule: IModule = {
       description: 'Your classic TippyBot reply',
       usage: '!tippy',
       requiredLevel: 'user',
+      params: [],
       async execute({ ctx, username }) {
         ctx.bot.chat(`${username}, Don't even ask...`)
       }

@@ -14,17 +14,7 @@ import {
   normalizeGroupName,
   normalizeUsername
 } from '../utils/validation'
-
-const LEVEL_RANK: Record<PermissionLevel, number> = {
-  user: 0,
-  member: 1,
-  operator: 2,
-  admin: 3
-}
-
-function rankOf(level: PermissionLevel): number {
-  return LEVEL_RANK[level]
-}
+import { rankOfLevel } from '../utils/permissionLevel'
 
 function ok(message: string): PermissionMutationResult {
   return { ok: true, message }
@@ -87,7 +77,7 @@ export class PermissionService implements IPermissionService {
   }
 
   meetsLevel(username: string, level: PermissionLevel): boolean {
-    return rankOf(this.getLevel(username)) >= rankOf(level)
+    return rankOfLevel(this.getLevel(username)) >= rankOfLevel(level)
   }
 
   isBlacklisted(username: string): boolean {
@@ -98,7 +88,7 @@ export class PermissionService implements IPermissionService {
     const name = normalizeUsername(username)
     if (this.blacklist.has(name)) return false
 
-    if (rankOf(this.getLevel(name)) >= rankOf(command.requiredLevel)) return true
+    if (rankOfLevel(this.getLevel(name)) >= rankOfLevel(command.requiredLevel)) return true
 
     // Admin-gated commands are never reachable through a group, even if
     // stored data was somehow hand-edited to associate one.
@@ -187,7 +177,7 @@ export class PermissionService implements IPermissionService {
 
   async addMember(actor: string, target: string): Promise<PermissionMutationResult> {
     const actorLevel = this.getLevel(actor)
-    if (rankOf(actorLevel) < rankOf('operator')) return fail('You need Operator or higher to manage Members.')
+    if (rankOfLevel(actorLevel) < rankOfLevel('operator')) return fail('You need Operator or higher to manage Members.')
     if (!isValidPlayerName(target)) return fail("That name doesn't look right.")
 
     const targetName = normalizeUsername(target)
@@ -204,7 +194,7 @@ export class PermissionService implements IPermissionService {
 
   async removeMember(actor: string, target: string): Promise<PermissionMutationResult> {
     const actorLevel = this.getLevel(actor)
-    if (rankOf(actorLevel) < rankOf('operator')) return fail('You need Operator or higher to manage Members.')
+    if (rankOfLevel(actorLevel) < rankOfLevel('operator')) return fail('You need Operator or higher to manage Members.')
     if (!isValidPlayerName(target)) return fail("That name doesn't look right.")
 
     const targetName = normalizeUsername(target)
@@ -223,7 +213,7 @@ export class PermissionService implements IPermissionService {
 
   async addToBlacklist(actor: string, target: string): Promise<PermissionMutationResult> {
     const actorLevel = this.getLevel(actor)
-    if (rankOf(actorLevel) < rankOf('operator')) return fail('You need Operator or higher to manage the blacklist.')
+    if (rankOfLevel(actorLevel) < rankOfLevel('operator')) return fail('You need Operator or higher to manage the blacklist.')
     if (!isValidPlayerName(target)) return fail("That name doesn't look right.")
 
     const targetName = normalizeUsername(target)
@@ -240,7 +230,7 @@ export class PermissionService implements IPermissionService {
 
   async removeFromBlacklist(actor: string, target: string): Promise<PermissionMutationResult> {
     const actorLevel = this.getLevel(actor)
-    if (rankOf(actorLevel) < rankOf('operator')) return fail('You need Operator or higher to manage the blacklist.')
+    if (rankOfLevel(actorLevel) < rankOfLevel('operator')) return fail('You need Operator or higher to manage the blacklist.')
     if (!isValidPlayerName(target)) return fail("That name doesn't look right.")
 
     const targetName = normalizeUsername(target)
@@ -259,7 +249,7 @@ export class PermissionService implements IPermissionService {
   // ---- groups (Operator and up) ----
 
   async createGroup(actor: string, name: string): Promise<PermissionMutationResult> {
-    if (rankOf(this.getLevel(actor)) < rankOf('operator')) return fail('You need Operator or higher to manage groups.')
+    if (rankOfLevel(this.getLevel(actor)) < rankOfLevel('operator')) return fail('You need Operator or higher to manage groups.')
     if (!isValidGroupName(name)) return fail("That group name doesn't look right.")
 
     const key = normalizeGroupName(name)
@@ -272,7 +262,7 @@ export class PermissionService implements IPermissionService {
   }
 
   async deleteGroup(actor: string, name: string): Promise<PermissionMutationResult> {
-    if (rankOf(this.getLevel(actor)) < rankOf('operator')) return fail('You need Operator or higher to manage groups.')
+    if (rankOfLevel(this.getLevel(actor)) < rankOfLevel('operator')) return fail('You need Operator or higher to manage groups.')
 
     const key = normalizeGroupName(name)
     if (!this.groups.has(key)) return fail(`Group "${name}" does not exist.`)
@@ -284,7 +274,7 @@ export class PermissionService implements IPermissionService {
   }
 
   async renameGroup(actor: string, oldName: string, newName: string): Promise<PermissionMutationResult> {
-    if (rankOf(this.getLevel(actor)) < rankOf('operator')) return fail('You need Operator or higher to manage groups.')
+    if (rankOfLevel(this.getLevel(actor)) < rankOfLevel('operator')) return fail('You need Operator or higher to manage groups.')
     if (!isValidGroupName(newName)) return fail("That group name doesn't look right.")
 
     const oldKey = normalizeGroupName(oldName)
@@ -309,7 +299,7 @@ export class PermissionService implements IPermissionService {
   }
 
   async addGroupMember(actor: string, groupName: string, target: string): Promise<PermissionMutationResult> {
-    if (rankOf(this.getLevel(actor)) < rankOf('operator')) return fail('You need Operator or higher to manage groups.')
+    if (rankOfLevel(this.getLevel(actor)) < rankOfLevel('operator')) return fail('You need Operator or higher to manage groups.')
     if (!isValidPlayerName(target)) return fail("That name doesn't look right.")
 
     const group = this.groups.get(normalizeGroupName(groupName))
@@ -325,7 +315,7 @@ export class PermissionService implements IPermissionService {
   }
 
   async removeGroupMember(actor: string, groupName: string, target: string): Promise<PermissionMutationResult> {
-    if (rankOf(this.getLevel(actor)) < rankOf('operator')) return fail('You need Operator or higher to manage groups.')
+    if (rankOfLevel(this.getLevel(actor)) < rankOfLevel('operator')) return fail('You need Operator or higher to manage groups.')
 
     const group = this.groups.get(normalizeGroupName(groupName))
     if (!group) return fail(`Group "${groupName}" does not exist.`)
@@ -345,7 +335,7 @@ export class PermissionService implements IPermissionService {
     commandName: string,
     commands: ICommandRegistry
   ): Promise<PermissionMutationResult> {
-    if (rankOf(this.getLevel(actor)) < rankOf('operator')) return fail('You need Operator or higher to manage groups.')
+    if (rankOfLevel(this.getLevel(actor)) < rankOfLevel('operator')) return fail('You need Operator or higher to manage groups.')
 
     const group = this.groups.get(normalizeGroupName(groupName))
     if (!group) return fail(`Group "${groupName}" does not exist.`)
@@ -366,7 +356,7 @@ export class PermissionService implements IPermissionService {
   }
 
   async removeGroupCommand(actor: string, groupName: string, commandName: string): Promise<PermissionMutationResult> {
-    if (rankOf(this.getLevel(actor)) < rankOf('operator')) return fail('You need Operator or higher to manage groups.')
+    if (rankOfLevel(this.getLevel(actor)) < rankOfLevel('operator')) return fail('You need Operator or higher to manage groups.')
 
     const group = this.groups.get(normalizeGroupName(groupName))
     if (!group) return fail(`Group "${groupName}" does not exist.`)

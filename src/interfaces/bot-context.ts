@@ -6,6 +6,8 @@ import type { IActionRegistry } from './action'
 import type { ICommandRegistry } from './command'
 import type { IPathfinderLock } from './pathfinder-lock'
 import type { IPermissionService } from './permissions'
+import type { ITaskManager } from './tasks'
+import type { ICooldownService } from './cooldown'
 
 export interface IBotContext {
   bot: Bot
@@ -16,4 +18,6 @@ export interface IBotContext {
   commands: ICommandRegistry
   pathfinderLock: IPathfinderLock
   permissions: IPermissionService
+  tasks: ITaskManager
+  cooldowns: ICooldownService
 }

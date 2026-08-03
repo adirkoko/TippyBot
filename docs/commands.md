@@ -15,6 +15,8 @@ Permission levels and how group access works are explained in full in [permissio
 | `!jump` | Makes the bot jump once | `User` | `navigation` |
 | `!come [playerName]` | Walks to a player | `Member` | `navigation` |
 | `!s` | Finds the caller's sign and toggles the trapdoor beneath it | `Member` | `sign-trapdoor` |
+| `!status` | Shows what the bot is currently doing and who requested it | `User` | `bot-status` |
+| `!cancel` | Cancels the bot's active task | `User` | `bot-status` |
 | `!access me` | Shows your own level and group memberships | `User` | `access` |
 | `!access player <player>` | Shows another player's level | `User` | `access` |
 | `!access grant <player> operator` | Grants Operator | `Admin` | `access` |
@@ -72,7 +74,7 @@ Permission levels and how group access works are explained in full in [permissio
 * **Group-assignable:** Technically yes, but pointless — same as `!ping`.
 * **Arguments:** None.
 * **Example:** `!jump`
-* **Limits:** 2s cooldown per player.
+* **Limits:** 2s cooldown per player (via `CooldownService`; on cooldown, replies "Please wait Ns before using this again.").
 * **Notes:** Failures are reported via a throttled chat message rather than every attempt, to avoid spam.
 * **Module:** `navigation`
 
@@ -84,8 +86,8 @@ Permission levels and how group access works are explained in full in [permissio
 * **Group-assignable:** Yes — a group can grant specific `User`s access without making them Members.
 * **Arguments:** `playerName` (optional) — must match `^[A-Za-z0-9_]{1,16}$`; defaults to the caller.
 * **Example:** `!come` (bot walks to you) / `!come Alice` (bot walks to Alice)
-* **Limits:** 2s cooldown per player · refuses targets over 256 blocks away · 30s navigation timeout.
-* **Notes:** Only one navigation-driven command (`!come` or `!s`) can run at a time — if the bot is already busy, it replies accordingly instead of queuing or interrupting.
+* **Limits:** 2s cooldown per player · refuses targets over 256 blocks away · 30s task timeout (see [tasks.md](tasks.md)).
+* **Notes:** Only one long-running command (`!come` or `!s`) can run at a time — if the bot is already busy, it replies accordingly instead of queuing or interrupting. Cancellable via `!cancel`; also stops cleanly on disconnect or death.
 * **Module:** `navigation`
 
 ## Sign & Trapdoor (`sign-trapdoor`)
@@ -98,9 +100,35 @@ Permission levels and how group access works are explained in full in [permissio
 * **Group-assignable:** Yes.
 * **Arguments:** None — the caller's username is used as the search label automatically.
 * **Example:** `!s`
-* **Limits:** No cooldown · 48-block sign search radius · 15s walk timeout · must end within 4.5 blocks (Minecraft's interaction reach) to activate the trapdoor.
-* **Notes:** Requires a trapdoor directly one block beneath the matching sign; if none is found, or the bot can't get close enough, it reports back instead of retrying. On success it also sends the caller a private `/msg` confirmation.
+* **Limits:** No cooldown · 48-block sign search radius · 15s walk timeout · 20s overall task timeout (see [tasks.md](tasks.md)) · must end within 4.5 blocks (Minecraft's interaction reach) to activate the trapdoor.
+* **Notes:** Requires a trapdoor directly one block beneath the matching sign; if none is found, or the bot can't get close enough, it reports back instead of retrying. On success it also sends the caller a private `/msg` confirmation. Only one long-running command (`!come` or `!s`) can run at a time; cancellable via `!cancel`.
 * **Module:** `sign-trapdoor`
+
+## Bot Status (`bot-status`)
+
+#### `!status`
+
+* **Syntax:** `!status`
+* **Description:** Shows what the bot is currently doing and who requested it.
+* **Minimum role:** `User`
+* **Group-assignable:** Technically yes, but pointless — it's already open to every non-blacklisted player.
+* **Arguments:** None.
+* **Example:** `!status` → `Currently running "come" for Alice (started 4s ago).` or `I'm not doing anything right now.`
+* **Limits:** None.
+* **Notes:** Reflects `ctx.tasks`; see [tasks.md](tasks.md).
+* **Module:** `bot-status`
+
+#### `!cancel`
+
+* **Syntax:** `!cancel`
+* **Description:** Cancels the bot's currently active task, if any.
+* **Minimum role:** `User`
+* **Group-assignable:** Technically yes, but pointless — the underlying permission check (requester or Operator+) happens inside `TaskManager` regardless of how `!cancel` itself was reached.
+* **Arguments:** None — always targets whatever's active.
+* **Example:** `!cancel` → `Cancelled "come".`
+* **Limits:** None.
+* **Notes:** Allowed for the player who requested the active task, or for an `Operator`+; refused for anyone else with a clear message. See [tasks.md](tasks.md).
+* **Module:** `bot-status`
 
 ## Access Management (`access`)
 

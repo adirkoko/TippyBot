@@ -14,12 +14,15 @@ const GoalNear = (goals as any).GoalNear
 /** Identifier used when this module "owns" the pathfinder */
 const SIGN_TRAPDOOR_OWNER_ID = 'sign-trapdoor:s'
 
+/** Overall task timeout: covers the walk (waitForGoalReached's own 15s) plus the toggle/whisper sequence */
+const SIGN_TASK_TIMEOUT_MS = 20_000
+
 /**
  * Triggers the trapdoor located directly beneath a sign containing the specified label.
  * @param ctx The bot context
  * @param label The label to search for on signs
  * @param whisperTo Optional username to send a private message to
- * @returns 
+ * @returns
  */
 async function triggerTrapdoorForLabel(
   ctx: IBotContext,
@@ -79,9 +82,36 @@ async function triggerTrapdoorForLabel(
     return
   }
 
+  const activeTask = ctx.tasks.getActive()
+  if (activeTask) {
+    logger.info(`SignTrapdoor: blocked, task active (name=${activeTask.name}, requestedBy=${activeTask.requestedBy})`)
+    bot.chat(`I'm busy with something else right now.`)
+    return
+  }
+
   if (!ctx.pathfinderLock.acquire(SIGN_TRAPDOOR_OWNER_ID)) {
     logger.info(`SignTrapdoor: navigation blocked by owner=${ctx.pathfinderLock.getOwner()?.id}`)
     bot.chat(`Someone else is steering me right now.`)
+    return
+  }
+
+  const task = ctx.tasks.start({
+    name: 's',
+    requestedBy: whisperTo ?? label,
+    timeoutMs: SIGN_TASK_TIMEOUT_MS,
+    onEnd: (reason) => {
+      if (reason === 'timeout') bot.chat("Couldn't reach it in time.")
+      else if (reason === 'cancelled') bot.chat('Cancelled.')
+      // death/disconnected: nothing useful to say
+      bot.pathfinder?.stop()
+      ctx.pathfinderLock.release(SIGN_TRAPDOOR_OWNER_ID)
+    }
+  })
+
+  if (!task) {
+    logger.info('SignTrapdoor: blocked, task slot taken concurrently')
+    bot.chat(`I'm busy with something else right now.`)
+    ctx.pathfinderLock.release(SIGN_TRAPDOOR_OWNER_ID)
     return
   }
 
@@ -97,13 +127,18 @@ async function triggerTrapdoorForLabel(
 
   // Wait for arrival
   try {
-    await waitForGoalReached(ctx, 15000)
+    await waitForGoalReached(ctx, 15000, task.signal)
   } catch (err) {
-    reportError(ctx, `SignTrapdoor: reach trapdoor at ${foundTrapdoor.position}`, err, "Couldn't reach it.")
-    return
-  } finally {
+    if (!task.signal.aborted) {
+      reportError(ctx, `SignTrapdoor: reach trapdoor at ${foundTrapdoor.position}`, err, "Couldn't reach it.")
+    }
     ctx.pathfinderLock.release(SIGN_TRAPDOOR_OWNER_ID)
+    task.finish()
+    return
   }
+
+  // Done moving -- free the pathfinder resource, but keep the task active for the toggle sequence below
+  ctx.pathfinderLock.release(SIGN_TRAPDOOR_OWNER_ID)
 
   // Check distance
   const botPos = bot.entity.position
@@ -118,6 +153,7 @@ async function triggerTrapdoorForLabel(
       `MaxReach=4.5`
     )
     bot.chat(`Too far for that.`)
+    task.finish()
     return
   }
 
@@ -133,6 +169,8 @@ async function triggerTrapdoorForLabel(
     logger.info(`SignTrapdoor: Trapdoor toggled for user="${whisperTo}", label="${label}", position=${foundTrapdoor.position}.`)
     bot.chat(`/msg ${whisperTo} The trapdoor for "${label}" has been toggled.`)
   }
+
+  task.finish()
 }
 
 /**
@@ -160,6 +198,7 @@ const signTrapdoorModule: IModule = {
         'Search a sign containing the username of the caller, toggle its trapdoor twice, and send a private message',
       usage: '!s',
       requiredLevel: 'member',
+      params: [],
       async execute({ ctx, username }) {
         const label = username
         if (!label) {

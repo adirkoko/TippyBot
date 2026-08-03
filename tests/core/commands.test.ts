@@ -4,13 +4,15 @@ import type { ICommand } from '../../src/interfaces/command'
 import type { IBotContext } from '../../src/interfaces/bot-context'
 import { createFakeLogger } from '../helpers/fakeLogger'
 import { createAllowAllPermissions } from '../helpers/fakePermissions'
+import { createAllowAllCooldowns } from '../helpers/fakeCooldowns'
 
 function makeCtx(prefix = '!'): IBotContext {
   return {
     config: { commandPrefix: prefix },
     logger: createFakeLogger(),
     bot: { chat: vi.fn() },
-    permissions: createAllowAllPermissions()
+    permissions: createAllowAllPermissions(),
+    cooldowns: createAllowAllCooldowns()
   } as unknown as IBotContext
 }
 
@@ -114,6 +116,101 @@ describe('CommandRegistry', () => {
 
       expect(execute).not.toHaveBeenCalled()
       expect(ctx.bot.chat).toHaveBeenCalledWith("You're not allowed to use any commands.")
+    })
+  })
+
+  describe('param validation gate', () => {
+    it('does not execute and replies with usage when a required arg is missing', async () => {
+      const registry = new CommandRegistry()
+      const execute = vi.fn()
+      registry.register({
+        name: 'come',
+        requiredLevel: 'user',
+        usage: '!come <player>',
+        params: [{ name: 'player', type: 'playerName' }],
+        execute
+      })
+
+      const ctx = makeCtx()
+      await registry.handleChatMessage('alice', '!come', ctx)
+
+      expect(execute).not.toHaveBeenCalled()
+      expect(ctx.bot.chat).toHaveBeenCalledWith('Usage: !come <player>')
+    })
+
+    it('executes when declared params are satisfied', async () => {
+      const registry = new CommandRegistry()
+      const execute = vi.fn().mockResolvedValue(undefined)
+      registry.register({
+        name: 'come',
+        requiredLevel: 'user',
+        params: [{ name: 'player', type: 'playerName', optional: true }],
+        execute
+      })
+
+      const ctx = makeCtx()
+      await registry.handleChatMessage('alice', '!come bob', ctx)
+
+      expect(execute).toHaveBeenCalled()
+    })
+
+    it('skips validation entirely for commands with no declared params', async () => {
+      const registry = new CommandRegistry()
+      const execute = vi.fn().mockResolvedValue(undefined)
+      registry.register({ name: 'access', requiredLevel: 'user', execute })
+
+      const ctx = makeCtx()
+      await registry.handleChatMessage('alice', '!access group command add Builders come', ctx)
+
+      expect(execute).toHaveBeenCalled()
+    })
+  })
+
+  describe('cooldown gate', () => {
+    it('does not execute and replies when a cooldown is active', async () => {
+      const registry = new CommandRegistry()
+      const execute = vi.fn()
+      registry.register({
+        name: 'jump',
+        requiredLevel: 'user',
+        cooldown: { perPlayerMs: 2000 },
+        execute
+      })
+
+      const ctx = makeCtx()
+      ;(ctx.cooldowns.getRemainingMs as any).mockReturnValue(1500)
+
+      await registry.handleChatMessage('alice', '!jump', ctx)
+
+      expect(execute).not.toHaveBeenCalled()
+      expect(ctx.bot.chat).toHaveBeenCalledWith('Please wait 2s before using this again.')
+    })
+
+    it('executes and records a use when no cooldown is active', async () => {
+      const registry = new CommandRegistry()
+      const execute = vi.fn().mockResolvedValue(undefined)
+      const cooldown = { perPlayerMs: 2000 }
+      registry.register({ name: 'jump', requiredLevel: 'user', cooldown, execute })
+
+      const ctx = makeCtx()
+      ;(ctx.cooldowns.getRemainingMs as any).mockReturnValue(0)
+
+      await registry.handleChatMessage('alice', '!jump', ctx)
+
+      expect(execute).toHaveBeenCalled()
+      expect(ctx.cooldowns.recordUse).toHaveBeenCalledWith('jump', 'alice', cooldown)
+    })
+
+    it('never touches the cooldown service for a command with no declared cooldown', async () => {
+      const registry = new CommandRegistry()
+      const execute = vi.fn().mockResolvedValue(undefined)
+      registry.register({ name: 'ping', requiredLevel: 'user', execute })
+
+      const ctx = makeCtx()
+      await registry.handleChatMessage('alice', '!ping', ctx)
+
+      expect(execute).toHaveBeenCalled()
+      expect(ctx.cooldowns.getRemainingMs).not.toHaveBeenCalled()
     })
   })
 })

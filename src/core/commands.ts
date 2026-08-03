@@ -5,6 +5,7 @@ import type {
   ICommandContext
 } from '../interfaces/command'
 import type { IBotContext } from '../interfaces/bot-context'
+import { validateParams } from './param-validator'
 
 export class CommandRegistry implements ICommandRegistry {
   private commands = new Map<string, ICommand>()
@@ -45,6 +46,21 @@ export class CommandRegistry implements ICommandRegistry {
       return
     }
 
+    const paramResult = validateParams(command, args)
+    if (!paramResult.ok) {
+      ctx.bot.chat(paramResult.message)
+      return
+    }
+
+    if (command.cooldown) {
+      const remainingMs = ctx.cooldowns.getRemainingMs(command.name, username, command.cooldown)
+      if (remainingMs > 0) {
+        ctx.bot.chat(`Please wait ${formatCooldownRemaining(remainingMs)} before using this again.`)
+        return
+      }
+      ctx.cooldowns.recordUse(command.name, username, command.cooldown)
+    }
+
     const commandCtx: ICommandContext = {
       ctx,
       username,
@@ -58,4 +74,8 @@ export class CommandRegistry implements ICommandRegistry {
 
 function capitalize(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1)
+}
+
+function formatCooldownRemaining(ms: number): string {
+  return `${Math.ceil(ms / 1000)}s`
 }

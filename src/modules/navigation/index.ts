@@ -4,8 +4,9 @@
 import type { IModule } from '../../interfaces/module'
 import type { IAction } from '../../interfaces/action'
 import type { ICommand } from '../../interfaces/command'
+import type { TaskHandle, TaskEndReason } from '../../interfaces/tasks'
 import { Movements, goals } from 'mineflayer-pathfinder'
-import { createChatThrottler, createCommandCooldownManager } from '../../utils/chat'
+import { createChatThrottler } from '../../utils/chat'
 import { distanceSquared } from '../../utils/navigation'
 import { reportError } from '../../utils/errors'
 import { isValidPlayerName } from '../../utils/validation'
@@ -24,11 +25,8 @@ const NAVIGATION_OWNER_ID = 'navigation:come'
 
 /** Internal type representing an active navigation state */
 type ActiveNavigation = {
-  id: number
-  type: 'come'
   targetName: string
-  startedAt: number
-  timeoutHandle?: ReturnType<typeof setTimeout>
+  taskHandle: TaskHandle
 }
 
 const navigationModule: IModule = {
@@ -40,48 +38,45 @@ const navigationModule: IModule = {
 
     // --- Shared state for this module ---
     let activeNav: ActiveNavigation | null = null
-    let navCounter = 0
 
     const chatThrottled = createChatThrottler(bot)
-    const checkCommandCooldown = createCommandCooldownManager()
 
     /**
-     * Clears the active navigation state.
+     * Clears the active navigation state (task slot + pathfinder lock).
      * @param reason The reason for clearing the active navigation
-     * @returns void
      */
     function clearActiveNav(reason: string) {
       if (!activeNav) return
 
-      if (activeNav.timeoutHandle) {
-        clearTimeout(activeNav.timeoutHandle)
-      }
-
+      activeNav.taskHandle.finish()
       logger.info(`navigation finished (reason=${reason}, target=${activeNav.targetName})`)
 
       activeNav = null
       ctx.pathfinderLock.release(NAVIGATION_OWNER_ID)
     }
 
-
     /**
-     * Attaches a timeout to the current navigation.
-     * @param currentNav The current active navigation state
+     * Reacts to the task ending abnormally (timeout, !cancel, death, or disconnect).
+     * @param reason Why the task ended
      */
-    function attachNavigationTimeout(currentNav: ActiveNavigation) {
-      const id = currentNav.id
-
-      const timeoutHandle = setTimeout(() => {
-        if (!activeNav || activeNav.id !== id) return
-
-        logger.info(`navigation timeout (target=${activeNav.targetName})`)
-        bot.chat("Couldn't reach it in time.")
-
-        bot.pathfinder.stop()
-        clearActiveNav('navigation_timeout')
-      }, NAVIGATION_TIMEOUT_MS)
-
-      currentNav.timeoutHandle = timeoutHandle
+    function onTaskEnd(reason: TaskEndReason) {
+      switch (reason) {
+        case 'timeout':
+          bot.chat("Couldn't reach it in time.")
+          bot.pathfinder?.stop()
+          break
+        case 'cancelled':
+          bot.chat('Navigation cancelled.')
+          bot.pathfinder?.stop()
+          break
+        case 'death':
+          bot.chat('Oops... I died.')
+          break
+        case 'disconnected':
+          // Connection is gone; nothing to say.
+          break
+      }
+      clearActiveNav(reason)
     }
 
     // --- Pathfinding-related event handlers ---
@@ -118,22 +113,6 @@ const navigationModule: IModule = {
       }
     })
 
-    bot.on('death', () => {
-      if (!activeNav) return
-      logger.info(`bot died during navigation (target=${activeNav.targetName})`)
-      bot.chat("Oops... I died.")
-
-      clearActiveNav('death')
-    })
-
-    bot.on('end', () => {
-      if (activeNav) {
-        logger.error('bot disconnected during active navigation')
-        activeNav = null
-        ctx.pathfinderLock.release(NAVIGATION_OWNER_ID)
-      }
-    })
-
     // --- Action: jump ---
 
     const jumpAction: IAction = {
@@ -161,6 +140,7 @@ const navigationModule: IModule = {
       async run(ctx, args) {
         try {
           const targetName = args[0]
+          const requestedBy = args[1] ?? targetName
 
           if (!targetName) {
             logger.info(`come command missing target`)
@@ -175,22 +155,10 @@ const navigationModule: IModule = {
             return
           }
 
-          if (activeNav) {
-            if (activeNav.type === 'come') {
-              if (activeNav.targetName === targetName) {
-                logger.info(`navigation already active (target=${activeNav.targetName})`)
-                ctx.bot.chat("I'm already on my way.")
-
-              } else {
-                logger.info(`navigation conflict (requested=${targetName}, active=${activeNav.targetName})`)
-                ctx.bot.chat("I'm busy with another trip.")
-
-              }
-            } else {
-              logger.info(`navigation already running (type=${activeNav.type})`)
-              ctx.bot.chat("I'm on a task already.")
-
-            }
+          const activeTask = ctx.tasks.getActive()
+          if (activeTask) {
+            logger.info(`navigation blocked: task active (name=${activeTask.name}, requestedBy=${activeTask.requestedBy})`)
+            ctx.bot.chat("I'm busy with something else right now.")
             return
           }
 
@@ -237,6 +205,20 @@ const navigationModule: IModule = {
             return
           }
 
+          const task = ctx.tasks.start({
+            name: 'come',
+            requestedBy,
+            timeoutMs: NAVIGATION_TIMEOUT_MS,
+            onEnd: onTaskEnd
+          })
+
+          if (!task) {
+            logger.info('navigation blocked: task slot taken concurrently')
+            ctx.bot.chat("I'm busy with something else right now.")
+            ctx.pathfinderLock.release(NAVIGATION_OWNER_ID)
+            return
+          }
+
           const movements = new Movements(ctx.bot)
           movements.allowParkour = false
           movements.allow1by1towers = false
@@ -246,17 +228,9 @@ const navigationModule: IModule = {
             new (goals as any).GoalNear(targetPos.x, targetPos.y, targetPos.z, 1)
           )
 
-          const id = ++navCounter
-          activeNav = {
-            id,
-            type: 'come',
-            targetName,
-            startedAt: Date.now()
-          }
+          activeNav = { targetName, taskHandle: task }
 
-          attachNavigationTimeout(activeNav)
-
-          logger.info(`navigation started (id=${id}, target=${targetName})`)
+          logger.info(`navigation started (id=${task.id}, target=${targetName})`)
           ctx.bot.chat("On my way!")
 
         } catch (err) {
@@ -275,9 +249,10 @@ const navigationModule: IModule = {
       description: 'Make the bot jump once',
       usage: '!jump',
       requiredLevel: 'user',
-      async execute({ ctx, username }) {
+      params: [],
+      cooldown: { perPlayerMs: COMMAND_COOLDOWN_MS },
+      async execute({ ctx }) {
         try {
-          if (!checkCommandCooldown(username, COMMAND_COOLDOWN_MS)) return
           await ctx.actions.run('jump', ctx, [])
         } catch (err) {
           reportError(ctx, 'jump command', err)
@@ -294,20 +269,12 @@ const navigationModule: IModule = {
       description: 'Make the bot come to you or to a given player',
       usage: '!come [playerName]',
       requiredLevel: 'member',
+      params: [{ name: 'playerName', type: 'playerName', optional: true }],
+      cooldown: { perPlayerMs: COMMAND_COOLDOWN_MS },
       async execute({ ctx, username, args }) {
         try {
-          if (!checkCommandCooldown(username, COMMAND_COOLDOWN_MS)) return
-
           const targetName = args[0] || username
-
-          if (!targetName) {
-            logger.info(`come command missing target (command-level)`)
-            ctx.bot.chat("I need a name to go to.")
-            return
-          }
-
-
-          await ctx.actions.run('come', ctx, [targetName])
+          await ctx.actions.run('come', ctx, [targetName, username])
         } catch (err) {
           reportError(ctx, 'come command', err)
         }

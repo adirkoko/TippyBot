@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createChatThrottler, createCommandCooldownManager } from '../../src/utils/chat'
+import { createChatThrottler } from '../../src/utils/chat'
 import type { Bot } from 'mineflayer'
 
 beforeEach(() => {
@@ -53,45 +53,5 @@ describe('createChatThrottler', () => {
     chatThrottled('farewell', 'bye', 5000)
 
     expect(bot.chat).toHaveBeenCalledTimes(2)
-  })
-})
-
-describe('createCommandCooldownManager', () => {
-  it('allows the first command from a user', () => {
-    const checkCommandCooldown = createCommandCooldownManager()
-
-    expect(checkCommandCooldown('alice', 2000)).toBe(true)
-  })
-
-  it('blocks a second command from the same user within the cooldown', () => {
-    const checkCommandCooldown = createCommandCooldownManager()
-
-    checkCommandCooldown('alice', 2000)
-
-    expect(checkCommandCooldown('alice', 2000)).toBe(false)
-  })
-
-  it('allows the command again once the cooldown has elapsed', () => {
-    const checkCommandCooldown = createCommandCooldownManager()
-
-    checkCommandCooldown('alice', 2000)
-    vi.advanceTimersByTime(2001)
-
-    expect(checkCommandCooldown('alice', 2000)).toBe(true)
-  })
-
-  it('tracks cooldowns independently per user', () => {
-    const checkCommandCooldown = createCommandCooldownManager()
-
-    checkCommandCooldown('alice', 2000)
-
-    expect(checkCommandCooldown('bob', 2000)).toBe(true)
-  })
-
-  it('always allows commands with no username', () => {
-    const checkCommandCooldown = createCommandCooldownManager()
-
-    expect(checkCommandCooldown(undefined, 2000)).toBe(true)
-    expect(checkCommandCooldown(undefined, 2000)).toBe(true)
   })
 })
