@@ -4,7 +4,7 @@
 
 | Path | Responsibility |
 |---|---|
-| `src/core` | Bot creation and lifecycle (incl. reconnection), the action/command registries, the pathfinder lock, the permission service, the task manager, the cooldown service |
+| `src/core` | Bot creation and lifecycle (incl. reconnection), the action/command registries, the pathfinder lock, the permission service, the task manager, the cooldown service, the home service, and the shared atomic-JSON-file-store helper they're built on |
 | `src/interfaces` | TypeScript contracts shared across the framework (`IModule`, `IAction`, `ICommand`, `IBotContext`, ...) |
 | `src/modules` | Self-contained feature plugins (see [modules.md](modules.md)) |
 | `src/utils` | Small, stateless helper functions used by modules |
@@ -32,6 +32,7 @@ interface IBotContext {
   permissions: IPermissionService
   tasks: ITaskManager
   cooldowns: ICooldownService
+  homes: IHomeService
 }
 ```
 
@@ -49,7 +50,7 @@ This split exists so behavior can be triggered from more than one place — chat
 `CommandRegistry.handleChatMessage` ([src/core/commands.ts](../src/core/commands.ts)) is the single place a chat message becomes a command execution, and it runs every registered command through the same four gates, in order, before calling `execute`:
 
 1. **Permission** — `ctx.permissions.canUseCommand(username, command)`. Every `ICommand` must declare a `requiredLevel`. See [permissions.md](permissions.md) for the full model (levels, Admin config, custom groups, the `!access` commands, and storage).
-2. **Params** — `validateParams(command, args)` ([src/core/param-validator.ts](../src/core/param-validator.ts)), checked against the command's optional `params: ParamSpec[]`. Handles missing/extra arguments and typed checks (`playerName`, `groupName`, `integer` with `min`/`max`, `enum` with `values`). A command that omits `params` is left alone — it parses its own args (`access`'s subcommand tree is the example).
+2. **Params** — `validateParams(command, args)` ([src/core/param-validator.ts](../src/core/param-validator.ts)), checked against the command's optional `params: ParamSpec[]`. Handles missing/extra arguments and typed checks (`playerName`, `groupName`, `integer` with `min`/`max`, `enum` with `values`). The last spec can set `rest: true` to consume all remaining args as one value instead of counting them individually — `!say`'s `<message>` is the example. A command that omits `params` is left alone — it parses its own args (`access`'s subcommand tree is the example).
 3. **Cooldown** — `ctx.cooldowns.getRemainingMs(...)` / `recordUse(...)` (`CooldownService`, [src/core/cooldown-service.ts](../src/core/cooldown-service.ts)), checked against the command's optional `cooldown: CommandCooldownConfig` (`perPlayerMs` and/or `globalMs`). Declared on the command, never implemented inside `execute`.
 4. **Execute** — only now is `command.execute(commandCtx)` called.
 
@@ -64,18 +65,26 @@ A module never re-implements any of these checks itself; it only declares `requi
 Only one module should be allowed to drive `bot.pathfinder` at a time — two modules setting conflicting goals on the same tick would fight each other silently. [`PathfinderLock`](../src/core/pathfinder-lock.ts) is a small mutex exposed on `ctx.pathfinderLock` for exactly this:
 
 ```ts
-if (!ctx.pathfinderLock.acquire('my-module:my-command')) {
+if (!ctx.pathfinderLock.acquire('my-module')) {
   // someone else is already navigating — bail out or tell the player
   return
 }
 try {
   // set movements/goal, wait for arrival
 } finally {
-  ctx.pathfinderLock.release('my-module:my-command')
+  ctx.pathfinderLock.release('my-module')
 }
 ```
 
-Any module that calls `bot.pathfinder.setGoal(...)` should acquire the lock first and release it once movement is done (success, failure, or timeout — hence the `finally`). The `navigation` and `sign-trapdoor` modules both do this; see [modules.md](modules.md) for how each uses it.
+Any module that calls `bot.pathfinder.setGoal(...)` should acquire the lock first and release it once movement is done (success, failure, or timeout). `navigation` uses one shared owner id (`'navigation'`) across all of its pathfinder-driven commands (`!come`, `!follow`, `!goto`) since only one can ever be active anyway (enforced independently by `ctx.tasks`); `sign-trapdoor` uses its own id. See [modules.md](modules.md) for how each uses it.
+
+## Homes
+
+`ctx.homes` (`HomeService`, [src/core/home-service.ts](../src/core/home-service.ts)) holds one saved location per player — set via `!sethome`, walked to via `!home` (see [commands.md](commands.md)). It follows the exact same storage-behind-an-interface pattern as `PermissionService`: `IHomeStore` ([src/interfaces/home-store.ts](../src/interfaces/home-store.ts)) hides the on-disk format, and `JsonHomeStore` ([src/core/home-store.ts](../src/core/home-store.ts)) is the only implementation today, persisting to `data/homes.json`.
+
+Both `JsonPermissionStore` and `JsonHomeStore` are now thin wrappers around a shared pair of primitives in [src/core/json-file-store.ts](../src/core/json-file-store.ts) — `readJsonFile` (parse-or-fallback) and `writeJsonFileAtomic` (temp-file-then-rename, same crash-safety guarantee as before). A third JSON-backed store can reuse these instead of re-implementing atomic writes.
+
+Each saved home records the dimension it was set in alongside the coordinates. `!home` compares that against the bot's *current* dimension and refuses to walk if they differ, rather than attempting (and failing) to path across a dimension boundary — see [commands.md](commands.md) for the exact message.
 
 ## Error handling
 

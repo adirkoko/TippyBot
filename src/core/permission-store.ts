@@ -1,11 +1,6 @@
 // src/core/permission-store.ts
-import { promises as fs } from 'fs'
-import * as path from 'path'
 import type { IPermissionStore, PersistedPermissionData } from '../interfaces/permission-store'
-
-function emptyData(): PersistedPermissionData {
-  return { operators: [], members: [], blacklist: [], groups: {} }
-}
+import { readJsonFile, writeJsonFileAtomic } from './json-file-store'
 
 /**
  * JSON-file-backed IPermissionStore. Writes go to a temp file and are then
@@ -16,15 +11,7 @@ export class JsonPermissionStore implements IPermissionStore {
   constructor(private readonly filePath: string) {}
 
   async load(): Promise<PersistedPermissionData> {
-    let raw: string
-    try {
-      raw = await fs.readFile(this.filePath, 'utf8')
-    } catch (err: any) {
-      if (err?.code === 'ENOENT') return emptyData()
-      throw err
-    }
-
-    const parsed = JSON.parse(raw)
+    const parsed = await readJsonFile<any>(this.filePath, {})
     return {
       operators: Array.isArray(parsed?.operators) ? parsed.operators : [],
       members: Array.isArray(parsed?.members) ? parsed.members : [],
@@ -34,11 +21,6 @@ export class JsonPermissionStore implements IPermissionStore {
   }
 
   async save(data: PersistedPermissionData): Promise<void> {
-    const dir = path.dirname(this.filePath)
-    await fs.mkdir(dir, { recursive: true })
-
-    const tmpPath = path.join(dir, `.${path.basename(this.filePath)}.${process.pid}.${Date.now()}.tmp`)
-    await fs.writeFile(tmpPath, JSON.stringify(data, null, 2), 'utf8')
-    await fs.rename(tmpPath, this.filePath)
+    await writeJsonFileAtomic(this.filePath, data)
   }
 }

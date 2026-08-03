@@ -10,6 +10,7 @@ import type {
 import type { PermissionLevel } from '../interfaces/permissions'
 import { levelMeets } from '../utils/permissionLevel'
 import { normalizeUsername } from '../utils/validation'
+import { capitalize } from '../utils/text'
 
 interface ActiveTaskRecord {
   id: number
@@ -57,14 +58,14 @@ export class TaskManager implements ITaskManager {
     return { id, name, requestedBy, startedAt }
   }
 
-  cancel(actorUsername: string, actorLevel: PermissionLevel): TaskCancelResult {
+  cancel(actorUsername: string, actorLevel: PermissionLevel, minStaffLevel: PermissionLevel = 'operator'): TaskCancelResult {
     if (!this.active) return { ok: false, message: "There's nothing running right now." }
 
     const actor = normalizeUsername(actorUsername)
     const isOwner = actor === this.active.requestedBy
-    const isStaff = levelMeets(actorLevel, 'operator')
+    const isStaff = levelMeets(actorLevel, minStaffLevel)
     if (!isOwner && !isStaff) {
-      return { ok: false, message: 'Only the requester or an Operator can cancel this.' }
+      return { ok: false, message: `You need to be the requester or ${capitalize(minStaffLevel)}+ to cancel this.` }
     }
 
     const name = this.active.name

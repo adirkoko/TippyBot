@@ -6,6 +6,7 @@ import type {
 } from '../interfaces/command'
 import type { IBotContext } from '../interfaces/bot-context'
 import { validateParams } from './param-validator'
+import { capitalize } from '../utils/text'
 
 export class CommandRegistry implements ICommandRegistry {
   private commands = new Map<string, ICommand>()
@@ -70,10 +71,6 @@ export class CommandRegistry implements ICommandRegistry {
 
     await command.execute(commandCtx)
   }
-}
-
-function capitalize(s: string): string {
-  return s.charAt(0).toUpperCase() + s.slice(1)
 }
 
 function formatCooldownRemaining(ms: number): string {

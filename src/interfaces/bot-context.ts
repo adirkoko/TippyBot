@@ -8,6 +8,7 @@ import type { IPathfinderLock } from './pathfinder-lock'
 import type { IPermissionService } from './permissions'
 import type { ITaskManager } from './tasks'
 import type { ICooldownService } from './cooldown'
+import type { IHomeService } from './homes'
 
 export interface IBotContext {
   bot: Bot
@@ -20,4 +21,5 @@ export interface IBotContext {
   permissions: IPermissionService
   tasks: ITaskManager
   cooldowns: ICooldownService
+  homes: IHomeService
 }

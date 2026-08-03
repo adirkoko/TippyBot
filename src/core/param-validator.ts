@@ -13,10 +13,25 @@ export function validateParams(command: ICommand, args: string[]): ParamValidati
   if (!specs) return { ok: true }
 
   const requiredCount = specs.filter((spec) => !spec.optional).length
+  const restIndex = specs.findIndex((spec) => spec.rest)
 
   if (args.length < requiredCount) {
     return { ok: false, message: usageMessage(command) }
   }
+
+  if (restIndex !== -1) {
+    // Everything from restIndex onward is one value (e.g. a chat message) -- no upper bound on count.
+    for (let i = 0; i < restIndex; i++) {
+      const error = validateOne(specs[i], args[i])
+      if (error) return { ok: false, message: error }
+    }
+    const restSpec = specs[restIndex]
+    if (!restSpec.optional && args.length <= restIndex) {
+      return { ok: false, message: usageMessage(command) }
+    }
+    return { ok: true }
+  }
+
   if (args.length > specs.length) {
     return { ok: false, message: `Too many arguments. ${usageMessage(command)}` }
   }

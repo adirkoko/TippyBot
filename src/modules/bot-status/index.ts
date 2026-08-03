@@ -59,6 +59,24 @@ const botStatusModule: IModule = {
 
     commands.register(cancelCommand)
 
+    const stopCommand: ICommand = {
+      name: 'stop',
+      description: "Immediately stops any action or task the bot is currently doing",
+      usage: '!stop',
+      requiredLevel: 'operator',
+      params: [],
+      async execute({ ctx, username }) {
+        try {
+          const result = ctx.tasks.cancel(username, ctx.permissions.getLevel(username))
+          ctx.bot.chat(result.message)
+        } catch (err) {
+          reportError(ctx, 'stop command', err)
+        }
+      }
+    }
+
+    commands.register(stopCommand)
+
     logger.info('bot-status module initialized')
   }
 }

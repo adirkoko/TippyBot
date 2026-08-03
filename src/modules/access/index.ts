@@ -8,10 +8,7 @@ import type { ICommand } from '../../interfaces/command'
 import type { IBotContext } from '../../interfaces/bot-context'
 import { isValidPlayerName } from '../../utils/validation'
 import { reportError } from '../../utils/errors'
-
-function capitalize(s: string): string {
-  return s.charAt(0).toUpperCase() + s.slice(1)
-}
+import { capitalize } from '../../utils/text'
 
 function parseGrantLevel(raw: string | undefined): 'operator' | 'member' | null {
   const lower = raw?.toLowerCase()

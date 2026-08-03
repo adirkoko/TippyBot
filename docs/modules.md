@@ -12,16 +12,19 @@ Basic chat interaction, mostly useful for confirming the bot is alive. Also regi
 
 ### `navigation`
 
-Movement commands (`!jump`, `!come`). Cooldowns are declared on the commands (`cooldown: { perPlayerMs: ... }`) and enforced centrally — see [architecture.md](architecture.md#command-execution-pipeline). Implementation notes:
+Movement commands (`!jump`, `!come`, `!follow`/`!unfollow`, `!goto`). Cooldowns are declared on the commands (`cooldown: { perPlayerMs: ... }`) and enforced centrally — see [architecture.md](architecture.md#command-execution-pipeline). Implementation notes:
 
-* `!come` registers a task with `ctx.tasks` for the duration of the walk (see [tasks.md](tasks.md)) and acquires `ctx.pathfinderLock` under the owner id `navigation:come`; it reacts to `goal_reached`, `path_update`, and `path_reset` to report back to chat, and to the task's `onEnd` callback (timeout/cancel/death/disconnect) to clean up.
+* `!come`, `!follow`, and `!goto` all register a task with `ctx.tasks` for the duration of the walk (see [tasks.md](tasks.md)) and share one `ctx.pathfinderLock` owner id (`'navigation'`), since `ctx.tasks`' single-slot model already guarantees only one of them can be active at a time.
+* A single `activeNav` record (tagged with a `kind: 'come' | 'follow' | 'goto'`) backs all three, reused across the module's `goal_reached`/`path_update`/`path_reset` handlers and the shared `onEnd`/`clearActiveNav` cleanup path.
+* `!follow` uses `mineflayer-pathfinder`'s `GoalFollow` with `dynamic: true` so it keeps re-pathing as the target moves; reaching the target does *not* end the task (unlike `!come`/`!goto`, where it does) — only `!unfollow`/`!cancel`/`!stop`, a timeout, the target leaving (`bot.on('playerLeft', ...)`), or death/disconnect end it.
+* `!unfollow` doesn't call `ctx.tasks.cancel` with the default (`Operator`+) staff threshold — it passes `'member'` explicitly, and first checks that the active task is actually a `follow` before touching it, so it can never accidentally cancel an unrelated `!come`/`!goto`/`!s`.
 
 ### `sign-trapdoor`
 
 Provides `!s`. Implementation notes:
 
 * Sign text is read from block NBT via [`signWorld.ts`](../src/utils/signWorld.ts) / [`signUtils.ts`](../src/utils/signUtils.ts), which understand both the legacy `Text1..4` format and the modern `front_text`/`back_text` format.
-* Registers a task with `ctx.tasks` and acquires `ctx.pathfinderLock` under the owner id `sign-trapdoor:s` for the walk, same pattern as `navigation`; passes the task's `AbortSignal` into `waitForGoalReached` so `!cancel` can interrupt the walk immediately instead of waiting out its own internal timeout.
+* Registers a task with `ctx.tasks` and acquires `ctx.pathfinderLock` under its own owner id (`sign-trapdoor:s`) for the walk, same pattern as `navigation`; passes the task's `AbortSignal` into `waitForGoalReached` so `!cancel`/`!stop` can interrupt the walk immediately instead of waiting out its own internal timeout.
 
 ### `access`
 
@@ -29,7 +32,15 @@ The player-facing surface of the permission system — provides the full `!acces
 
 ### `bot-status`
 
-Provides `!status` and `!cancel`, the player-facing surface of `ctx.tasks`. See [tasks.md](tasks.md) for the full model (single active task, timeout, cancel permissions, cleanup on disconnect/death).
+Provides `!status`, `!cancel`, and `!stop` — the player-facing surface of `ctx.tasks`. See [tasks.md](tasks.md) for the full model (single active task, timeout, cancel permissions, cleanup on disconnect/death). `!stop` and `!cancel` call the exact same `ctx.tasks.cancel(username, level)`; the only difference is `!stop`'s own `requiredLevel: 'operator'` gate versus `!cancel`'s `'user'` gate with the requester-or-Operator check happening inside `TaskManager`.
+
+### `bot-ops`
+
+Basic operational commands: `!where`, `!look`, `!say`. `!where`/`!look` are simple, non-task, non-pathfinder reads/one-shot actions. `!say` is the one command with hand-written validation beyond what `params`/`cooldown` express (length, control characters, a leading-`/` guard against smuggling a server command through the bot's chat) — see [commands.md](commands.md) for the exact rules.
+
+### `homes`
+
+Provides `!sethome`/`!home`. Backed by `ctx.homes` (`HomeService`) rather than any state local to the module — see [architecture.md](architecture.md#homes). `!home` doesn't reimplement walking: it validates the saved dimension matches the bot's current one, then calls `ctx.actions.run('goto', ctx, [...])`, reusing `navigation`'s `goto` action directly.
 
 ## Writing a new module
 

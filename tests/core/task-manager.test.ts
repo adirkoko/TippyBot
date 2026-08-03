@@ -134,6 +134,28 @@ describe('TaskManager: cancel', () => {
 
     expect(result.ok).toBe(false)
   })
+
+  it('honors a custom minStaffLevel (e.g. Member for !unfollow)', () => {
+    const tasks = new TaskManager()
+    const onEnd = vi.fn()
+    tasks.start({ name: 'follow', requestedBy: 'alice', timeoutMs: 30_000, onEnd })
+
+    const byMember = tasks.cancel('bob', 'member', 'member')
+
+    expect(byMember.ok).toBe(true)
+    expect(onEnd).toHaveBeenCalledWith('cancelled')
+  })
+
+  it('still refuses below the custom minStaffLevel', () => {
+    const tasks = new TaskManager()
+    const onEnd = vi.fn()
+    tasks.start({ name: 'follow', requestedBy: 'alice', timeoutMs: 30_000, onEnd })
+
+    const byUser = tasks.cancel('bob', 'user', 'member')
+
+    expect(byUser.ok).toBe(false)
+    expect(onEnd).not.toHaveBeenCalled()
+  })
 })
 
 describe('TaskManager: abort (bot lifecycle)', () => {

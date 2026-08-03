@@ -133,3 +133,36 @@ describe('validateParams: enum type', () => {
     expect(!result.ok && result.message).toContain('operator, member')
   })
 })
+
+describe('validateParams: rest param', () => {
+  it('accepts many words as the rest value without a "too many arguments" error', () => {
+    const command = makeCommand({ params: [{ name: 'message', type: 'string', rest: true }] })
+
+    expect(validateParams(command, ['hello', 'there', 'everyone'])).toEqual({ ok: true })
+  })
+
+  it('rejects a missing required rest value', () => {
+    const command = makeCommand({ params: [{ name: 'message', type: 'string', rest: true }] })
+
+    const result = validateParams(command, [])
+    expect(result.ok).toBe(false)
+  })
+
+  it('accepts a missing optional rest value', () => {
+    const command = makeCommand({ params: [{ name: 'message', type: 'string', rest: true, optional: true }] })
+
+    expect(validateParams(command, [])).toEqual({ ok: true })
+  })
+
+  it('still validates fixed params that precede the rest param', () => {
+    const command = makeCommand({
+      params: [
+        { name: 'target', type: 'playerName' },
+        { name: 'message', type: 'string', rest: true }
+      ]
+    })
+
+    const result = validateParams(command, ['not a name!', 'hello', 'world'])
+    expect(result.ok).toBe(false)
+  })
+})

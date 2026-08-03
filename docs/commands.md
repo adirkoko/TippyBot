@@ -1,6 +1,6 @@
 # Command Reference
 
-This is the single authoritative list of every chat command registered in TippyBot's `CommandRegistry`. It does not include internal `IAction`s (like `say`) — those aren't reachable directly from chat; see [architecture.md](architecture.md#actions-vs-commands) for the distinction.
+This is the single authoritative list of every chat command registered in TippyBot's `CommandRegistry`. It does not include internal `IAction`s — those aren't reachable directly from chat; see [architecture.md](architecture.md#actions-vs-commands) for the distinction. (Note: `chat-basic` registers an internal `say` *action* used as a building block by other commands — not the same thing as the `!say` *command* documented below.)
 
 **Whenever a command is added, renamed, or removed in `src/modules/**`, update this file in the same change.** No other document should carry a full command list — [modules.md](modules.md) and [permissions.md](permissions.md) link here instead of duplicating it.
 
@@ -14,9 +14,18 @@ Permission levels and how group access works are explained in full in [permissio
 | `!tippy` | Classic TippyBot one-liner | `User` | `chat-basic` |
 | `!jump` | Makes the bot jump once | `User` | `navigation` |
 | `!come [playerName]` | Walks to a player | `Member` | `navigation` |
+| `!follow <player>` | Continuously follows a player | `Member` | `navigation` |
+| `!unfollow` | Stops the active follow | `Member`* | `navigation` |
+| `!goto <x> <y> <z>` | Walks to specific coordinates | `Member` | `navigation` |
 | `!s` | Finds the caller's sign and toggles the trapdoor beneath it | `Member` | `sign-trapdoor` |
+| `!where` | Shows the bot's current position and dimension | `User` | `bot-ops` |
+| `!look <player>` | Makes the bot look at a player | `Member` | `bot-ops` |
+| `!say <message>` | Makes the bot send a chat message | `Operator` | `bot-ops` |
 | `!status` | Shows what the bot is currently doing and who requested it | `User` | `bot-status` |
-| `!cancel` | Cancels the bot's active task | `User` | `bot-status` |
+| `!cancel` | Cancels the bot's active task | `User`* | `bot-status` |
+| `!stop` | Immediately stops any active action or task | `Operator` | `bot-status` |
+| `!sethome` | Saves the caller's current position as their home | `Member` | `homes` |
+| `!home` | Walks to the caller's saved home | `Member` | `homes` |
 | `!access me` | Shows your own level and group memberships | `User` | `access` |
 | `!access player <player>` | Shows another player's level | `User` | `access` |
 | `!access grant <player> operator` | Grants Operator | `Admin` | `access` |
@@ -35,6 +44,8 @@ Permission levels and how group access works are explained in full in [permissio
 | `!access group member remove <group> <player>` | Removes a player from a group | `Operator` | `access` |
 | `!access group command add <group> <command>` | Assigns a command to a group | `Operator` | `access` |
 | `!access group command remove <group> <command>` | Unassigns a command from a group | `Operator` | `access` |
+
+\* `!cancel` and `!unfollow` are registered at `User` level so anyone not blacklisted can reach them, but each has its own finer-grained check inside `TaskManager.cancel`: `!cancel` requires being the task's requester or `Operator`+; `!unfollow` requires being the requester or `Member`+ (and only acts if the active task is specifically a `follow`). See [tasks.md](tasks.md).
 
 ---
 
@@ -87,7 +98,43 @@ Permission levels and how group access works are explained in full in [permissio
 * **Arguments:** `playerName` (optional) — must match `^[A-Za-z0-9_]{1,16}$`; defaults to the caller.
 * **Example:** `!come` (bot walks to you) / `!come Alice` (bot walks to Alice)
 * **Limits:** 2s cooldown per player · refuses targets over 256 blocks away · 30s task timeout (see [tasks.md](tasks.md)).
-* **Notes:** Only one long-running command (`!come` or `!s`) can run at a time — if the bot is already busy, it replies accordingly instead of queuing or interrupting. Cancellable via `!cancel`; also stops cleanly on disconnect or death.
+* **Notes:** Only one long-running command (`!come`, `!follow`, `!goto`, or `!s`) can run at a time — if the bot is already busy, it replies accordingly instead of queuing or interrupting. Cancellable via `!cancel`; also stops cleanly on disconnect or death.
+* **Module:** `navigation`
+
+#### `!follow <player>`
+
+* **Syntax:** `!follow <player>`
+* **Description:** Continuously walks to stay near the given player, re-pathing as they move.
+* **Minimum role:** `Member`
+* **Group-assignable:** Yes.
+* **Arguments:** `player` (required).
+* **Example:** `!follow Alice` → `Following Alice.`
+* **Limits:** 2s cooldown per player · stays within ~2 blocks · 10-minute safety-net task timeout (expected to normally end via `!unfollow`/`!stop`, not the timeout — see [tasks.md](tasks.md)).
+* **Notes:** Only one long-running command can run at a time. Ends automatically if the followed player leaves the server, if the bot dies or disconnects, or via `!unfollow`/`!cancel`/`!stop`. Reaching the target doesn't end the follow — it keeps going until explicitly stopped.
+* **Module:** `navigation`
+
+#### `!unfollow`
+
+* **Syntax:** `!unfollow`
+* **Description:** Stops the active `!follow`, if any.
+* **Minimum role:** `User` (see footnote above the summary table)
+* **Group-assignable:** N/A — effective minimum is enforced inside `TaskManager`, not via the command's own level.
+* **Arguments:** None — always targets the active task.
+* **Example:** `!unfollow` → `Cancelled "follow".`
+* **Limits:** None.
+* **Notes:** Only acts if the currently active task is specifically a `follow` — replies "I'm not following anyone." otherwise, even if some other task is active. Allowed for whoever requested the follow, or any `Member`+.
+* **Module:** `navigation`
+
+#### `!goto <x> <y> <z>`
+
+* **Syntax:** `!goto <x> <y> <z>`
+* **Description:** Walks to the exact given coordinates.
+* **Minimum role:** `Member`
+* **Group-assignable:** Yes.
+* **Arguments:** `x`, `y`, `z` (all required integers). `x`/`z` bounded to ±3,000,000; `y` bounded to Minecraft's build limits (-64 to 320).
+* **Example:** `!goto 100 64 -200` → `Heading to (100, 64, -200).`
+* **Limits:** 2s cooldown per player · refuses destinations over 256 blocks from the bot's current position · 30s task timeout.
+* **Notes:** Only one long-running command can run at a time. Cancellable via `!cancel`; also stops cleanly on disconnect or death.
 * **Module:** `navigation`
 
 ## Sign & Trapdoor (`sign-trapdoor`)
@@ -101,8 +148,46 @@ Permission levels and how group access works are explained in full in [permissio
 * **Arguments:** None — the caller's username is used as the search label automatically.
 * **Example:** `!s`
 * **Limits:** No cooldown · 48-block sign search radius · 15s walk timeout · 20s overall task timeout (see [tasks.md](tasks.md)) · must end within 4.5 blocks (Minecraft's interaction reach) to activate the trapdoor.
-* **Notes:** Requires a trapdoor directly one block beneath the matching sign; if none is found, or the bot can't get close enough, it reports back instead of retrying. On success it also sends the caller a private `/msg` confirmation. Only one long-running command (`!come` or `!s`) can run at a time; cancellable via `!cancel`.
+* **Notes:** Requires a trapdoor directly one block beneath the matching sign; if none is found, or the bot can't get close enough, it reports back instead of retrying. On success it also sends the caller a private `/msg` confirmation. Only one long-running command (`!come`, `!follow`, `!goto`, or `!s`) can run at a time; cancellable via `!cancel`.
 * **Module:** `sign-trapdoor`
+
+## Basic Ops (`bot-ops`)
+
+#### `!where`
+
+* **Syntax:** `!where`
+* **Description:** Reports the bot's current coordinates and dimension.
+* **Minimum role:** `User`
+* **Group-assignable:** Technically yes, but pointless — same as `!ping`.
+* **Arguments:** None.
+* **Example:** `!where` → `I'm at (120, 65, -340) in the overworld.`
+* **Limits:** None.
+* **Notes:** None.
+* **Module:** `bot-ops`
+
+#### `!look <player>`
+
+* **Syntax:** `!look <player>`
+* **Description:** Turns the bot's head to face the given player.
+* **Minimum role:** `Member`
+* **Group-assignable:** Yes.
+* **Arguments:** `player` (required).
+* **Example:** `!look Alice` → `Looking at Alice.`
+* **Limits:** 1s cooldown per player.
+* **Notes:** Requires the player to be visible to the bot; replies "Can't see that player." otherwise. Instantaneous — not a task, and doesn't touch `ctx.pathfinderLock`.
+* **Module:** `bot-ops`
+
+#### `!say <message>`
+
+* **Syntax:** `!say <message>`
+* **Description:** Sends `message` verbatim to server chat as the bot.
+* **Minimum role:** `Operator`
+* **Group-assignable:** No in practice — `requiredLevel: 'operator'` on this command means it can never be assigned to a group (see [permissions.md](permissions.md)).
+* **Arguments:** `message` (required) — everything after `!say`, joined back into one string.
+* **Example:** `!say Hello, world!` → bot sends `Hello, world!` to chat.
+* **Limits:** 1s **global** cooldown (shared across all callers, not per-player) · max 256 characters (Minecraft's own chat limit).
+* **Notes:** Refuses an empty/whitespace-only message, a message over the length limit, a message containing control characters (including newlines/tabs), or a message starting with `/` — the last guard specifically prevents `!say` from being used to smuggle a server command through the bot's chat.
+* **Module:** `bot-ops`
 
 ## Bot Status (`bot-status`)
 
@@ -129,6 +214,44 @@ Permission levels and how group access works are explained in full in [permissio
 * **Limits:** None.
 * **Notes:** Allowed for the player who requested the active task, or for an `Operator`+; refused for anyone else with a clear message. See [tasks.md](tasks.md).
 * **Module:** `bot-status`
+
+#### `!stop`
+
+* **Syntax:** `!stop`
+* **Description:** Immediately stops any action or task the bot is currently doing, regardless of who requested it.
+* **Minimum role:** `Operator`
+* **Group-assignable:** No in practice — `requiredLevel: 'operator'` means it can never be assigned to a group.
+* **Arguments:** None — always targets whatever's active.
+* **Example:** `!stop` → `Cancelled "follow".`
+* **Limits:** None.
+* **Notes:** Functionally the same underlying `TaskManager.cancel` call as `!cancel`, just gated at `Operator` from the outset rather than allowing the original requester too — a deliberate "emergency stop" for staff. Ends the task via its real `AbortSignal`-based cancellation path (see [tasks.md](tasks.md)), so an in-progress walk stops immediately rather than winding down on its own timeout.
+* **Module:** `bot-status`
+
+## Homes (`homes`)
+
+#### `!sethome`
+
+* **Syntax:** `!sethome`
+* **Description:** Saves the caller's current position (and dimension) as their home.
+* **Minimum role:** `Member`
+* **Group-assignable:** Yes.
+* **Arguments:** None — uses the caller's current position.
+* **Example:** `!sethome` → `Home set at (120, 65, -340) in the overworld.`
+* **Limits:** None.
+* **Notes:** One home per player; setting a new one overwrites the old. Stored via `ctx.homes` (`IHomeService`/`JsonHomeStore`), not inside the module — see [architecture.md](architecture.md#homes).
+* **Module:** `homes`
+
+#### `!home`
+
+* **Syntax:** `!home`
+* **Description:** Walks to the caller's saved home.
+* **Minimum role:** `Member`
+* **Group-assignable:** Yes.
+* **Arguments:** None.
+* **Example:** `!home` → reuses `!goto`'s walk, ending with `I've arrived!`
+* **Limits:** Same as `!goto` (256-block range, 30s task timeout), since it's implemented as a `!goto` to the saved coordinates.
+* **Notes:** Replies "You don't have a home set. Use !sethome first." if none is saved. Refuses to walk if the bot is currently in a different dimension than the one the home was saved in, rather than silently attempting (and failing) to cross dimensions.
+* **Module:** `homes`
 
 ## Access Management (`access`)
 

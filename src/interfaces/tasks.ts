@@ -41,8 +41,8 @@ export interface ITaskManager {
   /** Claims the single task slot, or returns null if the bot is already busy. */
   start(options: StartTaskOptions): TaskHandle | null
   getActive(): ActiveTaskInfo | undefined
-  /** Cancels the active task if actorUsername is its requester or actorLevel is Operator+. */
-  cancel(actorUsername: string, actorLevel: PermissionLevel): TaskCancelResult
+  /** Cancels the active task if actorUsername is its requester or actorLevel meets minStaffLevel (default Operator). */
+  cancel(actorUsername: string, actorLevel: PermissionLevel, minStaffLevel?: PermissionLevel): TaskCancelResult
   /** Force-ends the active task (if any) from a bot lifecycle event, e.g. disconnect or death. */
   abort(reason: Extract<TaskEndReason, 'disconnected' | 'death'>): void
 }

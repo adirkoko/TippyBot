@@ -14,10 +14,13 @@ import { PermissionService } from './permission-service'
 import { JsonPermissionStore } from './permission-store'
 import { TaskManager } from './task-manager'
 import { CooldownService } from './cooldown-service'
+import { HomeService } from './home-service'
+import { JsonHomeStore } from './home-store'
 import { computeReconnectDelay } from './reconnect'
 import { modules } from '../modules/index'
 
 const PERMISSIONS_FILE_PATH = './data/permissions.json'
+const HOMES_FILE_PATH = './data/homes.json'
 
 export async function startBot(config: IBotConfig): Promise<void> {
   const logger = consoleLogger
@@ -30,8 +33,11 @@ export async function startBot(config: IBotConfig): Promise<void> {
   const permissions = new PermissionService(config.admins, permissionStore, logger)
   const tasks = new TaskManager()
   const cooldowns = new CooldownService()
+  const homeStore = new JsonHomeStore(HOMES_FILE_PATH)
+  const homes = new HomeService(homeStore)
 
   await permissions.load()
+  await homes.load()
 
   let reconnectAttempts = 0
   let reconnectTimer: ReturnType<typeof setTimeout> | undefined
@@ -64,7 +70,8 @@ export async function startBot(config: IBotConfig): Promise<void> {
       pathfinderLock,
       permissions,
       tasks,
-      cooldowns
+      cooldowns,
+      homes
     }
 
     bot.once('login', () => {
