@@ -44,7 +44,7 @@ Provides `!sethome`/`!home`. Backed by `ctx.homes` (`HomeService`) rather than a
 
 ### `inventory`
 
-Provides `!inventory`, `!equip`, `!drop`, `!give`. None of these are tasks — they're single `await`-and-done calls into mineflayer's own inventory API (`bot.inventory.items()`, `bot.equip`, `bot.toss`), with no cancellable multi-step process to track. Item-name resolution is shared, reusable logic in [`src/utils/items.ts`](../src/utils/items.ts) (`resolveItemName`, `countItem`, `summarizeInventory`) rather than being reimplemented per command — reuse it if you add more item-related commands later (`!mine`, when it lands, will need the same "which item/block did they mean" resolution). `resolveItemName` deliberately refuses ambiguous substring matches instead of guessing, per [commands.md](commands.md#inventory--equipment-inventory).
+Provides `!inventory`, `!equip`, `!drop`, `!give`. None of these are tasks — they're single `await`-and-done calls into mineflayer's own inventory API (`bot.inventory.items()`, `bot.equip`, `bot.toss`), with no cancellable multi-step process to track. Item-name resolution is shared, reusable logic in [`src/utils/items.ts`](../src/utils/items.ts) (`resolveItemName`, `countItem`, `summarizeInventory`) rather than being reimplemented per command. `resolveItemName` deliberately refuses ambiguous substring matches instead of guessing, per [commands.md](commands.md#inventory--equipment-inventory); `gathering`'s `!mine` reuses the same underlying algorithm for block names via `resolveBlockName`.
 
 ### `chests`
 
@@ -56,11 +56,21 @@ Provides `!deposit`/`!withdraw`. Unlike `inventory`, these *are* tasks — they 
 
 ### `gathering`
 
-Provides `!collect` today; `!mine` will be added to this same module later. Implementation notes:
+Provides `!collect` and `!mine`.
+
+`!collect` implementation notes:
 
 * Finds nearby dropped-item entities via `Entity.getDroppedItem()` (a prismarine-entity helper that reads the entity's item-stack metadata for you) rather than hand-parsing entity metadata.
 * Walks to the nearest matching drop, waits briefly for Minecraft's automatic pickup to register, then re-evaluates — looping (up to a safety cap) until the requested amount is collected or no matching drops remain in range.
 * Reports how many items it actually collected even if the run ended early (cancelled, timed out, or ran out of drops) rather than treating a partial result as a failure.
+
+`!mine` implementation notes:
+
+* Block names resolve through [`resolveBlockName`](../src/utils/blocks.ts), a sibling of `resolveItemName` — both now share their exact/substring/ambiguous-match algorithm via [`resolveRegistryName`](../src/utils/registryLookup.ts) rather than duplicating it.
+* Requested blocks are checked against a hardcoded `MINEABLE_BLOCKS` allowlist *before* anything else happens — see [commands.md](commands.md) for the current list and the reasoning. This is the "explicit protection mechanism" for not mining protected/dangerous blocks; there's deliberately no path around it.
+* Before digging, calls `bot.pathfinder.bestHarvestTool(block)` and equips it if found; if the block requires a tool (`block.harvestTools`) and none is available, refuses rather than digging with bare hands.
+* The mining loop re-checks several stop conditions every iteration — health drop since starting, full inventory, no more matching blocks in range — and always reports how much it actually mined, not just pass/fail. `!cancel`/`!stop`/timeout are handled the same way as every other task, via `ctx.tasks` + the `onEnd` callback (which also calls `bot.stopDigging()`).
+* Same pathfinder/task pattern as `!collect` and `chests` — own owner id (`gathering:mine`), one task slot shared globally with every other long-running command.
 
 ## Writing a new module
 

@@ -1,49 +1,27 @@
 // src/utils/items.ts
 // Shared item-name resolution and inventory helpers for inventory/equipment commands.
 
-import type { Bot } from 'mineflayer'
 import type { Item } from 'prismarine-item'
+import { resolveRegistryName, type GameRegistry } from './registryLookup'
 
-/** The type of bot.registry -- avoids a direct dependency on prismarine-registry for just this. */
-export type ItemRegistry = Bot['registry']
+/** @deprecated import GameRegistry from './registryLookup' instead; kept as an alias so existing imports don't break. */
+export type ItemRegistry = GameRegistry
 
 export type ItemResolution =
   | { ok: true; name: string; id: number; displayName: string }
   | { ok: false; message: string }
-
-const MAX_AMBIGUOUS_SUGGESTIONS = 5
 
 /**
  * Resolves a player-typed item query against the registry. Exact name matches win outright;
  * otherwise falls back to substring matching. Never picks arbitrarily among multiple matches --
  * returns a clear "which one?" message instead.
  */
-export function resolveItemName(registry: ItemRegistry, query: string): ItemResolution {
-  const q = query.trim().toLowerCase()
-  if (!q) return { ok: false, message: 'I need an item name.' }
+export function resolveItemName(registry: GameRegistry, query: string): ItemResolution {
+  const result = resolveRegistryName(registry.itemsByName, registry.itemsArray, query, 'item')
+  if (!result.ok) return result
 
-  const exact = registry.itemsByName[q]
-  if (exact) {
-    return { ok: true, name: exact.name, id: exact.id, displayName: exact.displayName }
-  }
-
-  const matches = registry.itemsArray.filter((item) => item.name.includes(q))
-
-  if (matches.length === 0) {
-    return { ok: false, message: `I don't know an item called "${query}".` }
-  }
-
-  if (matches.length > 1) {
-    const shown = matches.slice(0, MAX_AMBIGUOUS_SUGGESTIONS).map((item) => item.name)
-    const suffix = matches.length > MAX_AMBIGUOUS_SUGGESTIONS ? ', ...' : ''
-    return {
-      ok: false,
-      message: `"${query}" could mean several items: ${shown.join(', ')}${suffix}. Be more specific.`
-    }
-  }
-
-  const match = matches[0]
-  return { ok: true, name: match.name, id: match.id, displayName: match.displayName }
+  const { name, id, displayName } = result.entry
+  return { ok: true, name, id, displayName }
 }
 
 /** Total count of an item (by registry name) currently held across all inventory stacks. */

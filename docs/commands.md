@@ -33,6 +33,7 @@ Permission levels and how group access works are explained in full in [permissio
 | `!deposit <item> [amount]` | Deposits items into the nearest reachable chest | `Member` | `chests` |
 | `!withdraw <item> [amount]` | Withdraws items from the nearest reachable chest | `Member` | `chests` |
 | `!collect <item> [amount]` | Picks up dropped items of a given type from the ground nearby | `Member` | `gathering` |
+| `!mine <block> [amount]` | Mines a quantity of an approved block type | `Operator` | `gathering` |
 | `!access me` | Shows your own level and group memberships | `User` | `access` |
 | `!access player <player>` | Shows another player's level | `User` | `access` |
 | `!access grant <player> operator` | Grants Operator | `Admin` | `access` |
@@ -352,6 +353,19 @@ Both commands register a task with `ctx.tasks` (see [tasks.md](tasks.md)) for th
 * **Example:** `!collect oak_log 10` → `Collected 10x Oak Log.`
 * **Limits:** 2s cooldown per player · 16-block search radius · visits at most 20 separate drops per run (safety cap) · 10s per-drop walk timeout · 60s overall task timeout.
 * **Notes:** Registers a task with `ctx.tasks`, same as `!deposit`/`!withdraw`/`!come`/etc. — only one long-running command at a time. If it's interrupted partway (cancelled, timed out, or ran out of nearby drops) after picking up *some* items, it still reports how many it actually collected rather than just failing silently. "Couldn't find any ... nearby." if none were found at all.
+* **Module:** `gathering`
+
+#### `!mine <block> [amount]`
+
+* **Syntax:** `!mine <block> [amount]`
+* **Description:** Finds and breaks a quantity of a specific, approved block type nearby.
+* **Minimum role:** `Operator` (a deliberately conservative starting point for something that permanently changes the world; may be revisited later)
+* **Group-assignable:** Yes, in principle (not `Admin`-gated) — kept at `Operator` deliberately for now.
+* **Arguments:** `block` (required) — must be on the approved list below; `amount` (optional positive integer, capped at 64) — defaults to 1 if omitted.
+* **Example:** `!mine stone 20` → `Mined 20x Stone.`
+* **Limits:** 2s cooldown per player · 16-block search radius · amount capped at 64 (one stack) even if a larger number is requested · visits at most 30 candidate blocks per run · 15s per-block walk timeout · 90s overall task timeout.
+* **Approved blocks (first pass, intentionally conservative):** `dirt`, `grass_block`, `sand`, `gravel`, `clay`, `stone`, `cobblestone`, `andesite`, `diorite`, `granite`, `sandstone`, the overworld log/plank pairs (`oak`/`spruce`/`birch`/`jungle`/`acacia`/`dark_oak`/`mangrove`/`cherry`), and the shallowest ores (`coal_ore`, `iron_ore`, `copper_ore`, and their `deepslate_` variants). Anything else — containers, redstone, TNT, spawners, portals, deeper ores — is refused with "I'm not allowed to mine ...". See `MINEABLE_BLOCKS` in [src/modules/gathering/index.ts](../src/modules/gathering/index.ts) to extend this deliberately.
+* **Notes:** Only breaks a block that's an *exact* name match for what was requested — never something merely similar. Checks for (and auto-equips, via `bestHarvestTool`) an appropriate tool before digging; refuses with a clear message if the block needs a tool the bot doesn't have. Stops safely and reports what it managed to mine (not just an error) if: the target amount is reached, the inventory fills up, the bot takes significant damage (health drops 4+ points below where it started), no more matching blocks remain in range, or the task is cancelled/times out. Registers a task with `ctx.tasks`, same as the other long-running commands — only one at a time.
 * **Module:** `gathering`
 
 ## Access Management (`access`)
