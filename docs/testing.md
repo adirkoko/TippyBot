@@ -34,6 +34,20 @@ npm run test:watch   # watch mode
 * **Block resolution** (`tests/utils/blocks.test.ts`) — `resolveBlockName` against fake registry fixtures; exercises the same shared [`resolveRegistryName`](../src/utils/registryLookup.ts) algorithm as `resolveItemName` from the block side.
 * **Navigation math** (`tests/utils/navigation.test.ts`) — `distanceSquared`/`isWithinDistance` boundary cases, and `nearestPosition` (picks the closest candidate; ties broken deterministically regardless of input order — the rule `!deposit`/`!withdraw`/`!collect`/`!mine` rely on to never pick a chest, dropped item, or block arbitrarily).
 
+## Web and logging coverage
+
+* **Log storage** (`tests/core/log-store.test.ts`) — central redaction before persistence/publication, safe instance paths, local-day rotation, gzip compression, reading and cursor pagination across compressed/current days, subscriptions, and one-shot disk-threshold warnings.
+* **Logger categories** (`tests/utils/logger.test.ts`) — category binding preserves the existing console API while forwarding `level`, `category`, message, and metadata to the instance store.
+* **Web configuration and `.env` updates** (`tests/config/webConfig.test.ts`, `tests/config/envFile.test.ts`) — strict bounds/defaults, content-preserving atomic append, idempotency, and concurrent password setup.
+* **Password setup and auth** (`tests/web/ensureWebPassword.test.ts`, `tests/web/auth.test.ts`) — 24-byte base64url generation, no regeneration/duplication, isolated stdout notification, no password in logging, timing-safe verification, session cookies, expiry/revocation, rate limiting, and the generic auth guard.
+* **HTTP/API/SSE integration** (`tests/web/server.test.ts`) — public login assets, protected pages/APIs, login/logout, per-IP lockout, safe instance summaries, history parameters, live SSE delivery, session-expiry notification, and subscription cleanup on disconnect.
+* **Redaction** (`tests/web/redaction.test.ts`) — inline, structured, nested, error, and circular metadata sanitization.
+
+The frontend is vanilla browser code without a DOM test dependency. Its
+filtering, selection/copy controls, responsive layout, and EventSource behavior
+are covered by the live smoke checklist in [web.md](web.md) and manual browser
+verification rather than unit tests.
+
 ## What's not covered
 
 There are no integration tests that spin up a real (or mocked) mineflayer `Bot`/pathfinder — the modules themselves (`chat-basic`, `navigation`, `sign-trapdoor`, `access`, `bot-status`, `bot-ops`, `homes`, `inventory`, `chests`, `gathering`) are exercised manually against a live server rather than under test. This includes `!mine`'s `MINEABLE_BLOCKS` allowlist and its stop conditions (health drop, full inventory, missing tool) — those are reviewed by hand in [src/modules/gathering/index.ts](../src/modules/gathering/index.ts) rather than unit-tested, consistent with the rest of this section. This includes the `!access` command's chat-parsing layer specifically: its subcommand routing is thin glue over `PermissionService`, which is where the real logic (and its tests) live. It also includes the reconnect *orchestration* in `bot.ts` (event wiring, `mineflayer.createBot` calls) — only the pure backoff math (`computeReconnectDelay`) is unit-tested; see [tasks.md](tasks.md#reconnection). The tests above focus on the framework pieces (`src/core`, `src/utils`, `src/config`) that are cheap to isolate and easy to get subtly wrong.

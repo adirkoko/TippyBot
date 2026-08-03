@@ -6,6 +6,7 @@ import type { IBotConfig } from '../interfaces/config'
 import type { IBotContext } from '../interfaces/bot-context'
 import type { IModule } from '../interfaces/module'
 import type { ILogger } from '../interfaces/logger'
+import type { LogStore } from './log-store'
 import type {
   BotInstanceError,
   BotInstanceSnapshot,
@@ -78,8 +79,8 @@ class BotInstance implements IBotInstanceHandle {
  * rejecting into the caller -- BotManager doesn't need to isolate failures
  * itself, this function already never throws.
  */
-export function startBot(config: IBotConfig): IBotInstanceHandle {
-  const logger = createConsoleLogger(config.id)
+export function startBot(config: IBotConfig, logStore?: LogStore): IBotInstanceHandle {
+  const logger = createConsoleLogger(config.id, logStore).withCategory('connection')
   const instance = new BotInstance(config.id, config)
 
   runInstance(config, logger, instance).catch((err) => {
@@ -93,11 +94,13 @@ export function startBot(config: IBotConfig): IBotInstanceHandle {
 
 async function runInstance(config: IBotConfig, logger: ILogger, instance: BotInstance): Promise<void> {
   // Services shared across reconnects -- only `bot` itself is recreated per connection attempt.
+  const moduleLogger = logger.withCategory('modules')
+  const permissionLogger = logger.withCategory('permissions')
   const actions = new ActionRegistry()
   const commands = new CommandRegistry()
   const pathfinderLock = new PathfinderLock()
   const permissionStore = new JsonPermissionStore(permissionsFilePath(config.id))
-  const permissions = new PermissionService(config.admins, permissionStore, logger)
+  const permissions = new PermissionService(config.admins, permissionStore, permissionLogger)
   const tasks = new TaskManager()
   const cooldowns = new CooldownService()
   const homeStore = new JsonHomeStore(homesFilePath(config.id))
@@ -131,7 +134,7 @@ async function runInstance(config: IBotConfig, logger: ILogger, instance: BotIns
     const ctx: IBotContext = {
       bot,
       config,
-      logger,
+      logger: moduleLogger,
       actions,
       commands,
       pathfinderLock,

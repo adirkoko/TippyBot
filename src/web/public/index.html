@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="dark">
+    <meta name="theme-color" content="#101417">
+    <title>לוגים בזמן אמת · TippyBot</title>
+    <link rel="stylesheet" href="/styles.css">
+    <script src="/app.js" defer></script>
+  </head>
+  <body data-page="logs">
+    <header class="site-header">
+      <div class="brand-block">
+        <div class="brand-mark small" aria-hidden="true">T</div>
+        <div>
+          <p class="eyebrow">TippyBot Console</p>
+          <h1>לוגים בזמן אמת</h1>
+        </div>
+      </div>
+      <div class="header-actions">
+        <span id="stream-state" class="stream-state is-idle" aria-live="polite">
+          <span class="state-dot" aria-hidden="true"></span>
+          ממתין למופע
+        </span>
+        <button id="logout-button" class="secondary-button" type="button">יציאה</button>
+      </div>
+    </header>
+
+    <main class="app-shell">
+      <aside class="filters-panel" aria-label="מסנני לוגים">
+        <div class="filter-section instance-section">
+          <label class="field-label" for="instance-select">מופע בוט</label>
+          <select id="instance-select" disabled>
+            <option value="">טוען מופעים…</option>
+          </select>
+          <p id="instance-summary" class="muted-line">מתחבר לשרת…</p>
+        </div>
+
+        <div class="filter-section">
+          <label class="field-label" for="search-input">חיפוש חופשי</label>
+          <div class="search-field">
+            <input id="search-input" type="search" placeholder="הודעה, קטגוריה או מידע נוסף">
+            <button id="clear-search" class="text-button" type="button" aria-label="ניקוי החיפוש">ניקוי</button>
+          </div>
+        </div>
+
+        <fieldset class="filter-section">
+          <legend>רמה</legend>
+          <div class="filter-grid" id="level-filters">
+            <label class="filter-chip level-info"><input type="checkbox" value="info" checked> INFO</label>
+            <label class="filter-chip level-warn"><input type="checkbox" value="warn" checked> WARN</label>
+            <label class="filter-chip level-error"><input type="checkbox" value="error" checked> ERROR</label>
+            <label class="filter-chip level-debug"><input type="checkbox" value="debug" checked> DEBUG</label>
+          </div>
+        </fieldset>
+
+        <fieldset class="filter-section">
+          <legend>קטגוריה</legend>
+          <div class="category-list" id="category-filters">
+            <label><input type="checkbox" value="connection" checked><span>connection</span></label>
+            <label><input type="checkbox" value="permissions" checked><span>permissions</span></label>
+            <label><input type="checkbox" value="modules" checked><span>modules</span></label>
+            <label><input type="checkbox" value="storage" checked><span>storage</span></label>
+          </div>
+        </fieldset>
+      </aside>
+
+      <section class="logs-panel" aria-labelledby="logs-heading">
+        <div class="logs-toolbar">
+          <div class="selection-tools">
+            <label class="select-visible">
+              <input id="select-visible" type="checkbox">
+              <span>בחירת המוצגים</span>
+            </label>
+            <span id="selection-count" class="selection-count">לא נבחרו רשומות</span>
+            <button id="copy-selected" class="secondary-button compact" type="button" disabled>
+              העתקת הנבחרות
+            </button>
+          </div>
+          <div class="copy-recent">
+            <label for="copy-count">אחרונים</label>
+            <input id="copy-count" type="number" min="1" max="1000" value="20" inputmode="numeric">
+            <button id="copy-recent" class="secondary-button compact" type="button">העתקה</button>
+          </div>
+        </div>
+
+        <div class="logs-heading-row">
+          <div>
+            <h2 id="logs-heading">יומן אירועים</h2>
+            <p id="result-count" class="muted-line">אין רשומות להצגה</p>
+          </div>
+          <button id="load-older" class="text-button load-older" type="button" hidden>טעינת רשומות ישנות</button>
+        </div>
+
+        <div id="log-list" class="log-list" role="log" aria-live="off" aria-relevant="additions"></div>
+        <div id="empty-state" class="empty-state">
+          <div class="empty-symbol" aria-hidden="true">›_</div>
+          <h3>עוד אין לוגים להצגה</h3>
+          <p>בחרו מופע או שנו את המסננים. רשומות חדשות יופיעו כאן בזמן אמת.</p>
+        </div>
+      </section>
+    </main>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  </body>
+</html>

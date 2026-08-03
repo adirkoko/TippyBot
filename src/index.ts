@@ -1,10 +1,35 @@
 // src/index.ts
-import 'dotenv/config' // Load environment variables from .env file (currently unused by bot instances themselves, kept for future non-instance-specific settings)
+import 'dotenv/config' // Load process-wide bot/web/log settings from .env before startup setup runs.
 
 import { BotManager } from './core/bot-manager'
+import { startBot } from './core/bot'
+import { LogStore } from './core/log-store'
 import { loadBotInstances } from './config/instances'
+import { loadWebConfig } from './config/webConfig'
+import { ensureWebPassword } from './web/setup/ensureWebPassword'
+import { startWebServer } from './web/server'
 
-function main(): void {
+async function main(): Promise<void> {
+  try {
+    // This setup path is intentionally isolated from ILogger/LogStore. It
+    // prints only a generic notice when it creates a password, never the
+    // password itself.
+    await ensureWebPassword()
+  } catch (err) {
+    console.error('Fatal error preparing the web password:', err)
+    process.exitCode = 1
+    return
+  }
+
+  let webConfig
+  try {
+    webConfig = loadWebConfig()
+  } catch (err) {
+    console.error('Fatal error loading web configuration:', err)
+    process.exitCode = 1
+    return
+  }
+
   let configs
   try {
     configs = loadBotInstances()
@@ -17,8 +42,52 @@ function main(): void {
   // BotManager.startAll() never throws -- a failed instance shows up as an
   // 'errored' handle (see src/core/bot.ts), so one bad connection never
   // takes down the others, even though they're all running in this one process.
-  const manager = new BotManager(configs)
+  const logStores = new Map(
+    configs.map((config) => [
+      config.id,
+      new LogStore({
+        instanceId: config.id,
+        diskWarnMb: webConfig.logDiskWarnMb,
+        diskCheckIntervalMs: webConfig.logDiskCheckIntervalMs
+      })
+    ])
+  )
+
+  try {
+    await Promise.all([...logStores.values()].map((store) => store.ready()))
+  } catch (err) {
+    await Promise.all([...logStores.values()].map((store) => store.close()))
+    console.error('Fatal error initializing log storage:', err)
+    process.exitCode = 1
+    return
+  }
+
+  const manager = new BotManager(configs, startBot, logStores)
   manager.startAll()
+
+  if (!webConfig.enabled) {
+    process.stdout.write('TippyBot web server is disabled.\n')
+    return
+  }
+
+  try {
+    await startWebServer({
+      manager,
+      getLogStore: (instanceId) => manager.getLogStore(instanceId),
+      password: webConfig.password,
+      host: webConfig.host,
+      port: webConfig.port,
+      rateLimiterOptions: {
+        maxAttempts: webConfig.loginMaxAttempts,
+        lockoutMs: webConfig.loginLockoutMs
+      }
+    })
+    process.stdout.write(`TippyBot web server listening on ${webConfig.host}:${webConfig.port}.\n`)
+  } catch (err) {
+    // Web startup failure must not take already-running bot instances down.
+    console.error('Failed to start the TippyBot web server:', err)
+    process.exitCode = 1
+  }
 }
 
-main()
+void main()

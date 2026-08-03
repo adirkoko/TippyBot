@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { BotManager } from '../../src/core/bot-manager'
 import type { IBotConfig } from '../../src/interfaces/config'
 import type { BotInstanceSnapshot, IBotInstanceHandle } from '../../src/interfaces/bot-instance'
+import type { LogStore } from '../../src/core/log-store'
 
 function fakeConfig(id: string): IBotConfig {
   return {
@@ -95,6 +96,19 @@ describe('BotManager', () => {
     manager.startAll()
 
     expect(manager.getInstance('nonexistent')).toBeUndefined()
+  })
+
+  it('passes the matching LogStore to each instance and exposes it read-only', () => {
+    const config = fakeConfig('steve')
+    const store = {} as LogStore
+    const start = vi.fn(fakeHandle)
+    const manager = new BotManager([config], start, new Map([['steve', store]]))
+
+    manager.startAll()
+
+    expect(start).toHaveBeenCalledWith(config, store)
+    expect(manager.getLogStore('steve')).toBe(store)
+    expect(manager.getLogStore('missing')).toBeUndefined()
   })
 
   it('defaults to the real startBot when no start function is injected', () => {

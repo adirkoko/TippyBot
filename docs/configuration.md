@@ -8,7 +8,7 @@ cp bots.config.example.json bots.config.json
 
 Then edit `bots.config.json` with your server and account details. See [multi-instance.md](multi-instance.md) for how multiple instances relate to each other and how their data stays isolated.
 
-`.env` is no longer where bot instances are configured — see [.env.example](../.env.example). It's reserved for settings that apply to the whole process rather than to a single instance (currently just an optional override for where the instance config file lives).
+`.env` is no longer where bot instances are configured — see [.env.example](../.env.example). It is reserved for process-wide settings: the optional instance-config path override, Web authentication/listening options, login lockout policy, and log-storage thresholds.
 
 ## `bots.config.json`
 
@@ -30,7 +30,7 @@ Then edit `bots.config.json` with your server and account details. See [multi-in
 
 | Field | Required | Description |
 |---|---|---|
-| `id` | yes | Unique identifier for this instance. 1-32 characters, letters/digits/`_`/`-` only. Namespaces this instance's `data/`, `auth_cache/`, and log lines — see [multi-instance.md](multi-instance.md) |
+| `id` | yes | Unique identifier for this instance. 1-32 characters, letters/digits/`_`/`-` only. Namespaces this instance's `data/`, `auth_cache/`, `logs/`, and console label — see [multi-instance.md](multi-instance.md) |
 | `host` | yes | Server address to connect to |
 | `port` | yes | Server port |
 | `username` | yes | Account username. With `microsoft` auth this can be anything (the real identity comes from the Microsoft login); with `offline` auth this **is** the bot's in-game name |
@@ -53,6 +53,13 @@ This directory holds live Microsoft auth tokens once you've logged in, one subdi
 ## Admins
 
 Each instance's `admins` list is parsed by [src/config/admins.ts](../src/config/admins.ts): trimmed, lowercased, deduped, and validated as Minecraft usernames — an invalid entry fails the bot at startup rather than silently being dropped. This list is the sole source of truth for who has `Admin` access on that instance; it's loaded once into memory and is never written back to disk or mutable via chat. See [permissions.md](permissions.md) for the full permission model.
+
+## Process-wide web and log settings
+
+The bot connection fields above remain in `bots.config.json`. Settings shared
+by the whole process (`WEB_*`, login lockout values, and `LOG_DISK_*`) live in
+`.env`. See [web.md](web.md) for the complete table, one-time password behavior,
+HTTP security guidance, and daily per-instance log storage.
 
 ## Chat signing (Minecraft 1.19+)
 

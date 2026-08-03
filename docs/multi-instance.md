@@ -73,6 +73,7 @@ Everything an instance owns is namespaced under its `id`, via helpers in [src/co
 | Permissions | `data/<id>/permissions.json` | `JsonPermissionStore`, constructed per-instance in `startBot` |
 | Homes | `data/<id>/homes.json` | `JsonHomeStore`, constructed per-instance in `startBot` |
 | Auth cache | `auth_cache/<id>/` | Default `profilesFolder`; overridable per-instance in `bots.config.json` |
+| Logs | `logs/<id>/YYYY-MM-DD.jsonl[.gz]` | One `LogStore` per instance, owned by the startup/manager wiring and readable by the authenticated web surface |
 | Logs | prefixed `[<id>]` | `createConsoleLogger(config.id)` ([src/utils/logger.ts](../src/utils/logger.ts)) |
 
 `id` is validated (1-32 characters, letters/digits/`_`/`-`) before it's ever used in a path, and `bots.config.json` is rejected at load time if two instances share an `id` — see [configuration.md](configuration.md).

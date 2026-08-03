@@ -4,23 +4,25 @@
 
 | Path | Responsibility |
 |---|---|
-| `src/core` | Bot creation and lifecycle (incl. reconnection), the action/command registries, the pathfinder lock, the permission service, the task manager, the cooldown service, the home service, and the shared atomic-JSON-file-store helper they're built on |
+| `src/core` | Bot creation and lifecycle (incl. reconnection), action/command registries, coordination services, persistence helpers, and per-instance log storage |
 | `src/interfaces` | TypeScript contracts shared across the framework (`IModule`, `IAction`, `ICommand`, `IBotContext`, ...) |
 | `src/modules` | Self-contained feature plugins (see [modules.md](modules.md)) |
 | `src/utils` | Small, stateless helper functions used by modules |
-| `src/config` | Loads and validates `bots.config.json` into one typed `IBotConfig` per instance |
+| `src/config` | Loads and validates bot, web, and log settings and safely updates `.env` |
+| `src/web` | Dependency-free HTTP server/router, general auth, log API/SSE routes, central redaction, and the vanilla frontend |
 
 ## Boot flow
 
 TippyBot can run multiple independent bot instances from one process, coordinated by `BotManager` — see [multi-instance.md](multi-instance.md) for the full picture. The flow below is per-instance; `BotManager.startAll()` runs it once for every instance in `bots.config.json`.
 
-1. `src/index.ts` loads `.env` (via `dotenv/config`), calls `loadBotInstances()` ([src/config/instances.ts](../src/config/instances.ts)) to get one `IBotConfig` per configured instance, constructs a `BotManager` ([src/core/bot-manager.ts](../src/core/bot-manager.ts)) with them, and calls `manager.startAll()`.
-2. `BotManager.startAll()` calls `startBot(config)` for every instance and keeps the returned `IBotInstanceHandle` in a map keyed by `id` — this map is the API surface a future control layer (e.g. a web admin panel) would read from instead of knowing about individual instances.
+1. `src/index.ts` loads `.env`, ensures a one-time `WEB_PASSWORD` exists without passing it through logging, validates the process-wide web/log settings, and calls `loadBotInstances()` ([src/config/instances.ts](../src/config/instances.ts)).
+2. One `LogStore` is created for every configured instance and supplied to `BotManager`. `BotManager.startAll()` passes the matching store into `startBot(config, logStore)`, keeps each returned `IBotInstanceHandle` keyed by `id`, and exposes read-only handle/store lookup to the web log surface.
 3. `startBot` ([src/core/bot.ts](../src/core/bot.ts)) returns that handle immediately and continues setup in the background: it constructs the services scoped to that instance's entire lifetime — `ActionRegistry`, `CommandRegistry`, `PathfinderLock`, `PermissionService`, `TaskManager`, `CooldownService`, `HomeService` — and awaits `PermissionService.load()` / `HomeService.load()` before anything else touches chat. All of this is local to that one call, so nothing is shared between instances. If this setup throws (e.g. a corrupt permissions file on disk), it's caught here and surfaced as an `'errored'` status on the handle rather than crashing the process.
 4. It then calls an internal `connect()` function that creates the mineflayer `bot`, loads the `pathfinder` plugin, and bundles everything into a single `IBotContext` (`ctx`) — the one object threaded through the entire framework. `ctx` itself is kept internal to `bot.ts`; the handle's `getSnapshot()` starts reflecting live values (ping, health, food, position, dimension, active task) pulled from it once the instance is `'online'` — see [multi-instance.md](multi-instance.md#botinstancehandle-one-api-surface-for-every-instance).
 5. `connect()` wires `bot.on('chat', ...)` to `commands.handleChatMessage`, wires `end`/`death` to `ctx.tasks.abort(...)` (see [tasks.md](tasks.md)), then calls `init(ctx)` on every module listed in [src/modules/index.ts](../src/modules/index.ts).
 6. Each module registers its actions and commands against `ctx.actions` / `ctx.commands` during `init`. From then on, the registries — not the modules themselves — own how a chat message turns into behavior.
 7. The handle's status moves `'connecting'` → `'online'` on `bot`'s `login` event, and back to `'reconnecting'` on `end`. If the connection drops, `connect()` runs again on a backoff schedule — see [tasks.md](tasks.md#reconnection). `bot` (and therefore `ctx`) is recreated per connection attempt; the services from step 3 persist across reconnects.
+8. After `manager.startAll()`, the authenticated HTTP server starts unless `WEB_ENABLED=false`. It reads only instance snapshots and the matching `LogStore`; it never receives a Mineflayer `Bot` or `IBotContext` and exposes no control operations. See [web.md](web.md).
 
 ## `IBotContext`
 
@@ -88,6 +90,27 @@ Any module that calls `bot.pathfinder.setGoal(...)` should acquire the lock firs
 Both `JsonPermissionStore` and `JsonHomeStore` are now thin wrappers around a shared pair of primitives in [src/core/json-file-store.ts](../src/core/json-file-store.ts) — `readJsonFile` (parse-or-fallback) and `writeJsonFileAtomic` (temp-file-then-rename, same crash-safety guarantee as before). A third JSON-backed store can reuse these instead of re-implementing atomic writes.
 
 Each saved home records the dimension it was set in alongside the coordinates. `!home` compares that against the bot's *current* dimension and refuses to walk if they differ, rather than attempting (and failing) to path across a dimension boundary — see [commands.md](commands.md) for the exact message.
+
+## Categorized logging and the web read surface
+
+Each configured instance owns a `LogStore` under `logs/<id>/`. The console
+logger is also connected to that store, and `ILogger.withCategory()` binds a
+logger to one of four categories without changing the existing log method
+signatures. `bot.ts` creates three bindings: `connection` for Mineflayer
+lifecycle events, `permissions` for `PermissionService` audit records, and
+`modules` for the `IBotContext` passed to every module. `LogStore` itself emits
+`storage` records for rotation, compression, and threshold warnings.
+
+`LogStore.append()` is the single persistence/publication gateway. It makes
+metadata JSON-safe and redacts sensitive keys and inline credentials before
+the record reaches JSONL, gzip history, subscribers, or SSE. Reads redact
+again to protect the UI from manually imported or older unredacted records.
+
+The web server is deliberately read-only and depends on `BotManager` instance
+snapshots plus per-instance `LogStore` lookup. Authentication, sessions, rate
+limiting, routing, and static-file handling are general web infrastructure so
+future pages can reuse them without coupling to the log page. Full details are
+in [web.md](web.md).
 
 ## Error handling
 

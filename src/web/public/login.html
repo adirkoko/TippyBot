@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="dark">
+    <meta name="theme-color" content="#101417">
+    <title>כניסה · TippyBot</title>
+    <link rel="stylesheet" href="/styles.css">
+    <script src="/app.js" defer></script>
+  </head>
+  <body data-page="login" class="login-page">
+    <main class="login-shell">
+      <section class="login-card" aria-labelledby="login-title">
+        <div class="brand-mark" aria-hidden="true">T</div>
+        <p class="eyebrow">TippyBot Console</p>
+        <h1 id="login-title">כניסה מאובטחת</h1>
+        <p class="login-intro">הזינו את סיסמת ממשק ה־Web כדי לצפות בלוגים של מופעי הבוט.</p>
+
+        <form id="login-form" novalidate>
+          <label class="field-label" for="password">סיסמה</label>
+          <div class="password-field">
+            <input
+              id="password"
+              name="password"
+              type="password"
+              autocomplete="current-password"
+              required
+              autofocus
+            >
+            <button id="toggle-password" class="text-button" type="button" aria-controls="password">
+              הצגה
+            </button>
+          </div>
+          <p id="login-error" class="form-error" role="alert" aria-live="polite"></p>
+          <button id="login-submit" class="primary-button full-width" type="submit">כניסה</button>
+        </form>
+      </section>
+    </main>
+  </body>
+</html>

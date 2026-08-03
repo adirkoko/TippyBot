@@ -2,10 +2,12 @@ import { vi } from 'vitest'
 import type { ILogger } from '../../src/interfaces/logger'
 
 export function createFakeLogger(): ILogger {
-  return {
+  const logger: ILogger = {
     info: vi.fn(),
     warn: vi.fn(),
     error: vi.fn(),
-    debug: vi.fn()
+    debug: vi.fn(),
+    withCategory: vi.fn(() => logger)
   }
+  return logger
 }
