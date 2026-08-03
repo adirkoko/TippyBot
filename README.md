@@ -13,10 +13,11 @@ For a deeper look at how it's put together, see the docs:
 * [docs/configuration.md](docs/configuration.md) — the instance config file, auth modes, and chat signing
 * [docs/testing.md](docs/testing.md) — running and writing tests
 * [docs/web.md](docs/web.md) — the authenticated real-time web log viewer, configuration, storage, and security
+* [docs/docker.md](docs/docker.md) — running TippyBot as a single Docker container, volumes, and updates
 
 ## Requirements
 
-* Node.js 18+
+* Node.js 22+ (required by `mineflayer`/`minecraft-protocol`)
 * A Minecraft server to connect to
 
 ## Install and run
@@ -43,6 +44,17 @@ The authenticated web log viewer is enabled by default at
 the first start generates one and saves it to `.env` without sending it
 through the logging system. See [docs/web.md](docs/web.md) before exposing the
 server outside a trusted local network.
+
+To run it as a container instead (recommended for a home server), see
+[docs/docker.md](docs/docker.md). All persistent data lives outside the
+project directory, at a path you choose:
+
+```bash
+cp docker.env.example .env   # set TIPPYBOT_DATA_ROOT to an absolute path
+mkdir -p "$TIPPYBOT_DATA_ROOT"/{config,data,auth_cache,logs}
+cp bots.config.example.json "$TIPPYBOT_DATA_ROOT/config/bots.config.json"
+docker compose up -d --build
+```
 
 ## Basic usage
 

@@ -1,0 +1,23 @@
+services:
+  tippybot:
+    build: .
+    image: tippybot:local
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    # Runs as this UID:GID instead of the image's baked-in default, so every
+    # file written under TIPPYBOT_DATA_ROOT is owned by a user you control on
+    # the host rather than by whatever system UID the image happens to bake
+    # in. Defaults to 1000:1000 -- the first regular user on most single-user
+    # Linux installs. See docs/docker.md.
+    user: "${PUID:-1000}:${PGID:-1000}"
+    volumes:
+      # Whole directories, not individual files -- .env's atomic
+      # rename-on-write (the auto-generated-password mechanism) needs its
+      # temp file and target on the same filesystem/mount. All persistent
+      # state lives outside the project directory, under TIPPYBOT_DATA_ROOT,
+      # which must be set (see docker.env.example and docs/docker.md).
+      - ${TIPPYBOT_DATA_ROOT:?Set TIPPYBOT_DATA_ROOT to an absolute host path for persistent data -- see docs/docker.md}/config:/app/config
+      - ${TIPPYBOT_DATA_ROOT:?Set TIPPYBOT_DATA_ROOT to an absolute host path for persistent data -- see docs/docker.md}/data:/app/data
+      - ${TIPPYBOT_DATA_ROOT:?Set TIPPYBOT_DATA_ROOT to an absolute host path for persistent data -- see docs/docker.md}/auth_cache:/app/auth_cache
+      - ${TIPPYBOT_DATA_ROOT:?Set TIPPYBOT_DATA_ROOT to an absolute host path for persistent data -- see docs/docker.md}/logs:/app/logs

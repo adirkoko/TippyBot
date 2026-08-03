@@ -29,8 +29,7 @@ export function redactText(input: string): string {
       /\b(authorization)\s*([:=])\s*[^\r\n]*/gi,
       (_match, key: string, separator: string) => `${key}${separator} ${REDACTED}`
     )
-    // Handle the two-part Authorization value before the generic key/value
-    // pass could consume only the word "Bearer".
+    // Handle a bare Bearer credential when no Authorization key is present.
     .replace(/\b(Bearer\s+)[A-Za-z0-9._~+/=-]+/gi, `$1${REDACTED}`)
     // JSON-shaped secrets, for example {"access_token":"..."}.
     .replace(

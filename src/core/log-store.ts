@@ -13,7 +13,7 @@ import {
   type LogLevel
 } from '../interfaces/log-entry'
 import { isValidInstanceId } from '../config/instancePaths'
-import { redactLogData } from '../web/redaction'
+import { redactLogData } from '../utils/redaction'
 
 const DAILY_LOG_PATTERN = /^(\d{4}-\d{2}-\d{2})\.jsonl(\.gz)?$/
 const DEFAULT_LIMIT = 200

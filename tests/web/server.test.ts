@@ -89,6 +89,19 @@ describe('web server', () => {
     expect(revoked.status).toBe(401)
   })
 
+  it('marks session cookies Secure when configured for HTTPS', async () => {
+    const { baseUrl } = await launch({ secureCookies: true })
+    const login = await postLogin(baseUrl, 'correct-password')
+
+    expect(login.setCookie).toContain('Secure')
+
+    const logout = await fetch(`${baseUrl}/api/logout`, {
+      method: 'POST',
+      headers: { Cookie: login.cookie }
+    })
+    expect(logout.headers.get('set-cookie')).toContain('Secure')
+  })
+
   it('locks only the client IP after the configured number of failed logins', async () => {
     const { baseUrl } = await launch({ maxAttempts: 2, lockoutMs: 30_000 })
 
@@ -198,6 +211,7 @@ interface LaunchOptions {
   maxAttempts?: number
   lockoutMs?: number
   sseHeartbeatMs?: number
+  secureCookies?: boolean
 }
 
 async function launch(options: LaunchOptions = {}): Promise<{
@@ -222,7 +236,8 @@ async function launch(options: LaunchOptions = {}): Promise<{
     sessions: new SessionStore(),
     rateLimiter,
     publicDir: path.resolve(process.cwd(), 'src/web/public'),
-    sseHeartbeatMs: options.sseHeartbeatMs
+    sseHeartbeatMs: options.sseHeartbeatMs,
+    secureCookies: options.secureCookies
   })
   await new Promise<void>((resolve, reject) => {
     activeServer?.once('error', reject)

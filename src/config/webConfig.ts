@@ -1,5 +1,6 @@
 export const DEFAULT_WEB_HOST = '0.0.0.0'
 export const DEFAULT_WEB_PORT = 3000
+export const DEFAULT_WEB_SECURE_COOKIES = false
 export const DEFAULT_WEB_LOGIN_MAX_ATTEMPTS = 5
 export const DEFAULT_WEB_LOGIN_LOCKOUT_MS = 15 * 60 * 1000
 export const DEFAULT_LOG_DISK_WARN_MB = 500
@@ -12,6 +13,7 @@ export interface WebConfig {
   host: string
   port: number
   password: string
+  secureCookies: boolean
   loginMaxAttempts: number
   loginLockoutMs: number
   logDiskWarnMb: number
@@ -31,6 +33,11 @@ export function loadWebConfig(env: NodeJS.ProcessEnv = process.env): WebConfig {
     env.WEB_HOST === undefined ? DEFAULT_WEB_HOST : requireNonEmpty(env.WEB_HOST, 'WEB_HOST').trim()
   const port = parseInteger(env.WEB_PORT, 'WEB_PORT', DEFAULT_WEB_PORT, 1, 65_535)
   const password = requireNonEmpty(env.WEB_PASSWORD, 'WEB_PASSWORD')
+  const secureCookies = parseBoolean(
+    env.WEB_SECURE_COOKIES,
+    'WEB_SECURE_COOKIES',
+    DEFAULT_WEB_SECURE_COOKIES
+  )
   const loginMaxAttempts = parseInteger(
     env.WEB_LOGIN_MAX_ATTEMPTS,
     'WEB_LOGIN_MAX_ATTEMPTS',
@@ -62,6 +69,7 @@ export function loadWebConfig(env: NodeJS.ProcessEnv = process.env): WebConfig {
     host,
     port,
     password,
+    secureCookies,
     loginMaxAttempts,
     loginLockoutMs,
     logDiskWarnMb,
@@ -70,13 +78,21 @@ export function loadWebConfig(env: NodeJS.ProcessEnv = process.env): WebConfig {
 }
 
 function parseEnabled(value: string | undefined): boolean {
-  if (value === undefined || value.trim() === '') return true
+  return parseBoolean(value, 'WEB_ENABLED', true)
+}
+
+function parseBoolean(
+  value: string | undefined,
+  name: string,
+  defaultValue: boolean
+): boolean {
+  if (value === undefined || value.trim() === '') return defaultValue
 
   const normalized = value.trim().toLowerCase()
   if (normalized === 'true') return true
   if (normalized === 'false') return false
 
-  throw new Error('WEB_ENABLED must be either "true" or "false".')
+  throw new Error(`${name} must be either "true" or "false".`)
 }
 
 function requireNonEmpty(value: string | undefined, name: string): string {

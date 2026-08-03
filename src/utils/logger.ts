@@ -5,7 +5,7 @@
 import type { ILogger } from '../interfaces/logger'
 import type { LogCategory, LogLevel } from '../interfaces/log-entry'
 import type { LogStore } from '../core/log-store'
-import { redactLogData } from '../web/redaction'
+import { redactLogData } from './redaction'
 
 export function createConsoleLogger(label: string, logStore?: LogStore): ILogger {
   const tag = `[${label}]`

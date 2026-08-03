@@ -26,6 +26,13 @@ Set `WEB_ENABLED=false` to disable the server completely.
 > that network. A password and an HttpOnly session cookie protect access, but
 > plain HTTP does not encrypt traffic in transit.
 
+When every browser connection is made through HTTPS (typically at a reverse
+proxy), set `WEB_SECURE_COOKIES=true`. This adds the `Secure` flag to session
+cookies. Do not enable it for direct HTTP access because browsers will then
+refuse to send the session cookie. TippyBot deliberately does not infer this
+setting from `X-Forwarded-Proto`, which is unsafe unless proxy trust is
+explicitly configured.
+
 ## Password setup
 
 Set `WEB_PASSWORD` in the process environment or `.env` to use a password you
@@ -53,6 +60,7 @@ directly. Do not paste it into chat, issue reports, or logs.
 | `WEB_HOST` | `0.0.0.0` | Address on which the HTTP server listens. |
 | `WEB_PORT` | `3000` | HTTP port, from 1 through 65535. |
 | `WEB_PASSWORD` | generated | Shared login password; generated once when missing. |
+| `WEB_SECURE_COOKIES` | `false` | Add `Secure` to session cookies; enable only for HTTPS access. |
 | `WEB_LOGIN_MAX_ATTEMPTS` | `5` | Failed attempts allowed per IP before a temporary lockout. |
 | `WEB_LOGIN_LOCKOUT_MS` | `900000` | Lockout duration per IP (15 minutes by default). |
 | `LOG_DISK_WARN_MB` | `500` | Per-instance log-directory warning threshold. |

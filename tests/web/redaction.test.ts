@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { redactLogData, redactText, redactValue } from '../../src/web/redaction'
+import { redactLogData, redactText, redactValue } from '../../src/utils/redaction'
 
 describe('log redaction', () => {
   it('redacts common inline credentials without hiding ordinary text', () => {

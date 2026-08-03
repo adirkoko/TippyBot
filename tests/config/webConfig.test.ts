@@ -6,6 +6,7 @@ import {
   DEFAULT_WEB_LOGIN_LOCKOUT_MS,
   DEFAULT_WEB_LOGIN_MAX_ATTEMPTS,
   DEFAULT_WEB_PORT,
+  DEFAULT_WEB_SECURE_COOKIES,
   loadWebConfig
 } from '../../src/config/webConfig'
 
@@ -16,6 +17,7 @@ describe('loadWebConfig', () => {
       host: DEFAULT_WEB_HOST,
       port: DEFAULT_WEB_PORT,
       password: 'secret',
+      secureCookies: DEFAULT_WEB_SECURE_COOKIES,
       loginMaxAttempts: DEFAULT_WEB_LOGIN_MAX_ATTEMPTS,
       loginLockoutMs: DEFAULT_WEB_LOGIN_LOCKOUT_MS,
       logDiskWarnMb: DEFAULT_LOG_DISK_WARN_MB,
@@ -30,6 +32,7 @@ describe('loadWebConfig', () => {
         WEB_HOST: ' 127.0.0.1 ',
         WEB_PORT: '8080',
         WEB_PASSWORD: 'configured password',
+        WEB_SECURE_COOKIES: ' TRUE ',
         WEB_LOGIN_MAX_ATTEMPTS: '3',
         WEB_LOGIN_LOCKOUT_MS: '12000',
         LOG_DISK_WARN_MB: '42',
@@ -40,6 +43,7 @@ describe('loadWebConfig', () => {
       host: '127.0.0.1',
       port: 8080,
       password: 'configured password',
+      secureCookies: true,
       loginMaxAttempts: 3,
       loginLockoutMs: 12000,
       logDiskWarnMb: 42,
@@ -68,6 +72,9 @@ describe('loadWebConfig', () => {
 
   it('rejects malformed WEB_ENABLED and an empty explicit host', () => {
     expect(() => loadWebConfig({ WEB_PASSWORD: 'secret', WEB_ENABLED: '0' })).toThrow(/WEB_ENABLED/)
+    expect(() => loadWebConfig({ WEB_PASSWORD: 'secret', WEB_SECURE_COOKIES: 'yes' })).toThrow(
+      /WEB_SECURE_COOKIES/
+    )
     expect(() => loadWebConfig({ WEB_PASSWORD: 'secret', WEB_HOST: '  ' })).toThrow(/WEB_HOST/)
   })
 })

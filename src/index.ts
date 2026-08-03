@@ -13,8 +13,11 @@ async function main(): Promise<void> {
   try {
     // This setup path is intentionally isolated from ILogger/LogStore. It
     // prints only a generic notice when it creates a password, never the
-    // password itself.
-    await ensureWebPassword()
+    // password itself. Reusing DOTENV_CONFIG_PATH (the same variable dotenv's
+    // own preload already honors) keeps a single source of truth for where
+    // .env lives -- important in Docker, where it's mounted outside the
+    // container's working directory (see docs/docker.md).
+    await ensureWebPassword({ envPath: process.env.DOTENV_CONFIG_PATH || undefined })
   } catch (err) {
     console.error('Fatal error preparing the web password:', err)
     process.exitCode = 1
@@ -75,6 +78,7 @@ async function main(): Promise<void> {
       manager,
       getLogStore: (instanceId) => manager.getLogStore(instanceId),
       password: webConfig.password,
+      secureCookies: webConfig.secureCookies,
       host: webConfig.host,
       port: webConfig.port,
       rateLimiterOptions: {

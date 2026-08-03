@@ -28,6 +28,10 @@ yarn-error.log*
 # Per-deployment bot instance config (copy from bots.config.example.json)
 bots.config.json
 
+# Docker: mounted volume holding .env + bots.config.json (see docker-compose.yml).
+# Rooted (/config/) so this never matches src/config/, which is real source code.
+/config/
+
 # Mineflayer / Minecraft auth
 auth_cache/
 profiles/

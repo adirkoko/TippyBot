@@ -7,9 +7,9 @@
 | `src/core` | Bot creation and lifecycle (incl. reconnection), action/command registries, coordination services, persistence helpers, and per-instance log storage |
 | `src/interfaces` | TypeScript contracts shared across the framework (`IModule`, `IAction`, `ICommand`, `IBotContext`, ...) |
 | `src/modules` | Self-contained feature plugins (see [modules.md](modules.md)) |
-| `src/utils` | Small, stateless helper functions used by modules |
+| `src/utils` | Small, stateless helpers shared across layers, including central log redaction |
 | `src/config` | Loads and validates bot, web, and log settings and safely updates `.env` |
-| `src/web` | Dependency-free HTTP server/router, general auth, log API/SSE routes, central redaction, and the vanilla frontend |
+| `src/web` | Dependency-free HTTP server/router, general auth, log API/SSE routes, and the vanilla frontend |
 
 ## Boot flow
 
