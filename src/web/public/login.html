@@ -1,24 +1,27 @@
 <!doctype html>
-<html lang="he" dir="rtl">
+<html lang="en">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="color-scheme" content="dark light">
     <meta name="theme-color" content="#101417">
-    <title>כניסה · TippyBot</title>
+    <title>Sign in · TippyBot</title>
     <link rel="stylesheet" href="/styles.css">
     <script src="/app.js" defer></script>
   </head>
   <body data-page="login" class="login-page">
+    <button id="theme-toggle" class="icon-button theme-toggle login-theme-toggle" type="button" aria-label="Switch to light mode" title="Switch to light mode">
+      <svg class="icon" aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.65 17.65l1.42 1.42M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.65 6.35l1.42-1.42"></path></svg>
+    </button>
     <main class="login-shell">
       <section class="login-card" aria-labelledby="login-title">
         <div class="brand-mark" aria-hidden="true">T</div>
         <p class="eyebrow">TippyBot Console</p>
-        <h1 id="login-title">כניסה מאובטחת</h1>
-        <p class="login-intro">הזינו את סיסמת ממשק ה־Web כדי לצפות ב-Dashboard ובלוגים של מופעי הבוט.</p>
+        <h1 id="login-title">Secure sign in</h1>
+        <p class="login-intro">Enter the web console password to view the dashboard and bot instance logs.</p>
 
         <form id="login-form" novalidate>
-          <label class="field-label" for="password">סיסמה</label>
+          <label class="field-label" for="password">Password</label>
           <div class="password-field">
             <input
               id="password"
@@ -28,12 +31,12 @@
               required
               autofocus
             >
-            <button id="toggle-password" class="text-button" type="button" aria-controls="password">
-              הצגה
+            <button id="toggle-password" class="icon-button field-icon-button" type="button" aria-controls="password" aria-label="Show password" title="Show password">
+              <svg class="icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z"></path><circle cx="12" cy="12" r="2.5"></circle></svg>
             </button>
           </div>
           <p id="login-error" class="form-error" role="alert" aria-live="polite"></p>
-          <button id="login-submit" class="primary-button full-width" type="submit">כניסה</button>
+          <button id="login-submit" class="primary-button full-width" type="submit">Sign in</button>
         </form>
       </section>
     </main>

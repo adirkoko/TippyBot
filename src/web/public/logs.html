@@ -1,11 +1,11 @@
 <!doctype html>
-<html lang="he" dir="rtl">
+<html lang="en">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="color-scheme" content="dark light">
     <meta name="theme-color" content="#101417">
-    <title>לוגים בזמן אמת · TippyBot</title>
+    <title>Live logs · TippyBot</title>
     <link rel="stylesheet" href="/styles.css">
     <script src="/app.js" defer></script>
   </head>
@@ -15,43 +15,50 @@
         <div class="brand-mark small" aria-hidden="true">T</div>
         <div>
           <p class="eyebrow">TippyBot Console</p>
-          <h1>לוגים בזמן אמת</h1>
+          <h1>Live logs</h1>
         </div>
       </div>
-      <nav class="top-nav" aria-label="ניווט ראשי">
+      <nav class="top-nav" aria-label="Main navigation">
         <a class="nav-link" href="/">Dashboard</a>
         <a class="nav-link is-active" href="/logs" aria-current="page">Logs</a>
         <a class="nav-link" href="/bots">Bots</a>
       </nav>
       <div class="header-actions">
+        <button id="theme-toggle" class="icon-button theme-toggle" type="button" aria-label="Switch to light mode" title="Switch to light mode">
+          <svg class="icon" aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.65 17.65l1.42 1.42M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.65 6.35l1.42-1.42"></path></svg>
+        </button>
         <span id="stream-state" class="stream-state is-idle" aria-live="polite">
           <span class="state-dot" aria-hidden="true"></span>
-          ממתין למופע
+          Waiting for an instance
         </span>
-        <button id="logout-button" class="secondary-button" type="button">יציאה</button>
+        <button id="logout-button" class="icon-button" type="button" aria-label="Sign out" title="Sign out">
+          <svg class="icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M9 5H5a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h4M14 8l4 4-4 4M18 12H8"></path></svg>
+        </button>
       </div>
     </header>
 
     <main class="app-shell">
-      <aside class="filters-panel" aria-label="מסנני לוגים">
+      <aside class="filters-panel" aria-label="Log filters">
         <div class="filter-section instance-section">
-          <label class="field-label" for="instance-select">מופע בוט</label>
+          <label class="field-label" for="instance-select">Bot instance</label>
           <select id="instance-select" disabled>
-            <option value="">טוען מופעים…</option>
+            <option value="">Loading instances…</option>
           </select>
-          <p id="instance-summary" class="muted-line">מתחבר לשרת…</p>
+          <p id="instance-summary" class="muted-line">Connecting to server…</p>
         </div>
 
         <div class="filter-section">
-          <label class="field-label" for="search-input">חיפוש חופשי</label>
+          <label class="field-label" for="search-input">Search</label>
           <div class="search-field">
-            <input id="search-input" type="search" placeholder="הודעה, קטגוריה או מידע נוסף">
-            <button id="clear-search" class="text-button" type="button" aria-label="ניקוי החיפוש">ניקוי</button>
+            <input id="search-input" type="search" placeholder="Message, category, or metadata">
+            <button id="clear-search" class="icon-button field-icon-button" type="button" aria-label="Clear search" title="Clear search">
+              <svg class="icon" aria-hidden="true" viewBox="0 0 24 24"><path d="m7 7 10 10M17 7 7 17"></path></svg>
+            </button>
           </div>
         </div>
 
         <fieldset class="filter-section">
-          <legend>רמה</legend>
+          <legend>Level</legend>
           <div class="filter-grid" id="level-filters">
             <label class="filter-chip level-info"><input type="checkbox" value="info" checked> INFO</label>
             <label class="filter-chip level-warn"><input type="checkbox" value="warn" checked> WARN</label>
@@ -61,7 +68,7 @@
         </fieldset>
 
         <fieldset class="filter-section">
-          <legend>קטגוריה</legend>
+          <legend>Category</legend>
           <div class="category-list" id="category-filters">
             <label><input type="checkbox" value="connection" checked><span>connection</span></label>
             <label><input type="checkbox" value="permissions" checked><span>permissions</span></label>
@@ -76,33 +83,42 @@
           <div class="selection-tools">
             <label class="select-visible">
               <input id="select-visible" type="checkbox">
-              <span>בחירת המוצגים</span>
+              <span>Select visible</span>
             </label>
-            <span id="selection-count" class="selection-count">לא נבחרו רשומות</span>
+            <span id="selection-count" class="selection-count">No entries selected</span>
             <button id="copy-selected" class="secondary-button compact" type="button" disabled>
-              העתקת הנבחרות
+              <svg class="icon" aria-hidden="true" viewBox="0 0 24 24"><rect x="8" y="8" width="11" height="11" rx="2"></rect><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"></path></svg>
+              <span>Copy selected</span>
             </button>
           </div>
           <div class="copy-recent">
-            <label for="copy-count">אחרונים</label>
+            <label for="copy-count">Most recent</label>
             <input id="copy-count" type="number" min="1" max="1000" value="20" inputmode="numeric">
-            <button id="copy-recent" class="secondary-button compact" type="button">העתקה</button>
+            <button id="copy-recent" class="secondary-button compact" type="button">
+              <svg class="icon" aria-hidden="true" viewBox="0 0 24 24"><rect x="8" y="8" width="11" height="11" rx="2"></rect><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"></path></svg>
+              <span>Copy</span>
+            </button>
           </div>
         </div>
 
         <div class="logs-heading-row">
           <div>
-            <h2 id="logs-heading">יומן אירועים</h2>
-            <p id="result-count" class="muted-line">אין רשומות להצגה</p>
+            <h2 id="logs-heading">Event log</h2>
+            <p id="result-count" class="muted-line">No entries to display</p>
           </div>
-          <button id="load-older" class="text-button load-older" type="button" hidden>טעינת רשומות ישנות</button>
+          <button id="load-older" class="text-button load-older" type="button" hidden>
+            <svg class="icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"></path><path d="M3 3v5h5M12 7v5l3 2"></path></svg>
+            <span>Load older entries</span>
+          </button>
         </div>
 
         <div id="log-list" class="log-list" role="log" aria-live="off" aria-relevant="additions"></div>
         <div id="empty-state" class="empty-state">
-          <div class="empty-symbol" aria-hidden="true">›_</div>
-          <h3>עוד אין לוגים להצגה</h3>
-          <p>בחרו מופע או שנו את המסננים. רשומות חדשות יופיעו כאן בזמן אמת.</p>
+          <div class="empty-icon" aria-hidden="true">
+            <svg class="icon icon-lg" viewBox="0 0 24 24"><path d="M7 3h7l4 4v14H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z"></path><path d="M14 3v5h5M9 13l2 2-2 2M13 17h3"></path></svg>
+          </div>
+          <h3>No logs to display yet</h3>
+          <p>Select an instance or change the filters. New entries will appear here in real time.</p>
         </div>
       </section>
     </main>

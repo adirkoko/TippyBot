@@ -1,11 +1,11 @@
 <!doctype html>
-<html lang="he" dir="rtl">
+<html lang="en">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="color-scheme" content="dark light">
     <meta name="theme-color" content="#101417">
-    <title>ניהול בוטים · TippyBot</title>
+    <title>Bot management · TippyBot</title>
     <link rel="stylesheet" href="/styles.css">
     <script src="/app.js" defer></script>
   </head>
@@ -15,16 +15,21 @@
         <div class="brand-mark small" aria-hidden="true">T</div>
         <div>
           <p class="eyebrow">TippyBot Console</p>
-          <h1>ניהול בוטים</h1>
+          <h1>Bot management</h1>
         </div>
       </div>
-      <nav class="top-nav" aria-label="ניווט ראשי">
+      <nav class="top-nav" aria-label="Main navigation">
         <a class="nav-link" href="/">Dashboard</a>
         <a class="nav-link" href="/logs">Logs</a>
         <a class="nav-link is-active" href="/bots" aria-current="page">Bots</a>
       </nav>
       <div class="header-actions">
-        <button id="logout-button" class="secondary-button" type="button">יציאה</button>
+        <button id="theme-toggle" class="icon-button theme-toggle" type="button" aria-label="Switch to light mode" title="Switch to light mode">
+          <svg class="icon" aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.65 17.65l1.42 1.42M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.65 6.35l1.42-1.42"></path></svg>
+        </button>
+        <button id="logout-button" class="icon-button" type="button" aria-label="Sign out" title="Sign out">
+          <svg class="icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M9 5H5a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h4M14 8l4 4-4 4M18 12H8"></path></svg>
+        </button>
       </div>
     </header>
 
@@ -32,26 +37,34 @@
       <section aria-labelledby="bots-heading">
         <div class="bots-heading">
           <div>
-            <p class="eyebrow">מופעי בוט</p>
-            <h2 id="bots-heading">רשימת מופעים</h2>
+            <p class="eyebrow">Bot instances</p>
+            <h2 id="bots-heading">Instance list</h2>
           </div>
           <div class="bots-heading-actions">
-            <p id="bots-summary" class="bots-summary" aria-live="polite">טוען מופעים…</p>
-            <button id="add-bot-button" class="primary-button compact" type="button">הוספת בוט</button>
+            <p id="bots-summary" class="bots-summary" aria-live="polite">Loading instances…</p>
+            <button id="add-bot-button" class="primary-button compact" type="button">
+              <svg class="icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"></path></svg>
+              <span>Add bot</span>
+            </button>
           </div>
         </div>
 
-        <div id="bots-loading" class="bots-status-panel" role="status">טוען מופעים…</div>
+        <div id="bots-loading" class="bots-status-panel" role="status">Loading instances…</div>
 
         <div id="bots-error" class="bots-status-panel is-error" role="alert" hidden>
-          <p>טעינת רשימת המופעים נכשלה.</p>
-          <button id="bots-retry" class="secondary-button compact" type="button">ניסיון חוזר</button>
+          <p>Failed to load the instance list.</p>
+          <button id="bots-retry" class="secondary-button compact" type="button">
+            <svg class="icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M20 7v5h-5M4 17v-5h5"></path><path d="M6.1 9a7 7 0 0 1 11.4-2L20 9M4 15l2.5 2a7 7 0 0 0 11.4-2"></path></svg>
+            <span>Try again</span>
+          </button>
         </div>
 
         <div id="bots-empty" class="bots-empty" hidden>
-          <div class="empty-symbol" aria-hidden="true">◇</div>
-          <h3>אין מופעי בוט מוגדרים</h3>
-          <p>לחצו על "הוספת בוט" כדי להתחיל.</p>
+          <div class="empty-icon" aria-hidden="true">
+            <svg class="icon icon-lg" viewBox="0 0 24 24"><rect x="4" y="7" width="16" height="12" rx="3"></rect><path d="M9 7V5a3 3 0 0 1 6 0v2M8 12h.01M16 12h.01M9 16h6"></path></svg>
+          </div>
+          <h3>No bot instances configured</h3>
+          <p>Select "Add bot" to get started.</p>
         </div>
 
         <div id="bots-table-wrap" class="bots-table-wrap" hidden>
@@ -59,12 +72,12 @@
             <thead>
               <tr>
                 <th scope="col">ID</th>
-                <th scope="col">סטטוס</th>
-                <th scope="col">שרת</th>
-                <th scope="col">שם משתמש</th>
-                <th scope="col">אימות</th>
-                <th scope="col">חיבור אוטומטי</th>
-                <th scope="col">פעולות</th>
+                <th scope="col">Status</th>
+                <th scope="col">Server</th>
+                <th scope="col">Username</th>
+                <th scope="col">Authentication</th>
+                <th scope="col">Auto-connect</th>
+                <th scope="col">Actions</th>
               </tr>
             </thead>
             <tbody id="bots-table-body"></tbody>
@@ -73,82 +86,119 @@
       </section>
     </main>
 
-    <dialog id="bot-form-dialog" class="app-dialog bot-form-dialog">
+    <dialog id="bot-form-dialog" class="app-dialog bot-form-dialog" aria-labelledby="bot-form-title">
       <form id="bot-form" novalidate>
-        <h2 id="bot-form-title">הוספת מופע</h2>
-        <p id="bot-form-error" class="form-error" role="alert" aria-live="polite"></p>
+        <header class="dialog-header">
+          <div class="dialog-title-group">
+            <span class="dialog-icon" aria-hidden="true">
+              <svg class="icon" viewBox="0 0 24 24"><rect x="4" y="7" width="16" height="12" rx="3"></rect><path d="M9 7V5a3 3 0 0 1 6 0v2M8 12h.01M16 12h.01M9 16h6"></path></svg>
+            </span>
+            <div>
+              <p class="eyebrow">Instance configuration</p>
+              <h2 id="bot-form-title">Add instance</h2>
+            </div>
+          </div>
+          <button type="button" id="bot-form-close" class="icon-button dialog-close" aria-label="Close dialog" title="Close">
+            <svg class="icon" aria-hidden="true" viewBox="0 0 24 24"><path d="m7 7 10 10M17 7 7 17"></path></svg>
+          </button>
+        </header>
 
-        <div class="form-grid">
-          <div class="field">
-            <label class="field-label" for="bot-form-id">ID</label>
-            <input id="bot-form-id" name="id" required pattern="[A-Za-z0-9_-]{1,32}" autocomplete="off">
+        <div class="dialog-body">
+          <p id="bot-form-error" class="form-error" role="alert" aria-live="polite"></p>
+
+          <div class="form-grid">
+            <div class="field">
+              <label class="field-label" for="bot-form-id">ID</label>
+              <input id="bot-form-id" name="id" required pattern="[A-Za-z0-9_-]{1,32}" autocomplete="off">
+            </div>
+
+            <div class="field">
+              <label class="field-label" for="bot-form-host">Server (host)</label>
+              <input id="bot-form-host" name="host" required autocomplete="off">
+            </div>
+
+            <div class="field">
+              <label class="field-label" for="bot-form-port">Port</label>
+              <input id="bot-form-port" name="port" type="number" min="1" max="65535" required inputmode="numeric">
+            </div>
+
+            <div class="field">
+              <label class="field-label" for="bot-form-username">Username</label>
+              <input id="bot-form-username" name="username" required autocomplete="off">
+            </div>
+
+            <div class="field">
+              <label class="field-label" for="bot-form-auth">Authentication</label>
+              <select id="bot-form-auth" name="auth">
+                <option value="microsoft">Microsoft</option>
+                <option value="offline">Offline</option>
+              </select>
+            </div>
+
+            <div class="field">
+              <label class="field-label" for="bot-form-prefix">Command prefix</label>
+              <input id="bot-form-prefix" name="commandPrefix" placeholder="!" autocomplete="off">
+            </div>
+
+            <div class="field field-wide">
+              <label class="field-label" for="bot-form-admins">Administrators (comma-separated usernames)</label>
+              <input id="bot-form-admins" name="admins" placeholder="Player1, Player2" autocomplete="off">
+            </div>
+
+            <div class="field field-wide">
+              <label class="field-label" for="bot-form-profiles">auth_cache directory (optional)</label>
+              <input id="bot-form-profiles" name="profilesFolder" placeholder="./auth_cache/<id>" autocomplete="off">
+            </div>
           </div>
 
-          <div class="field">
-            <label class="field-label" for="bot-form-host">שרת (host)</label>
-            <input id="bot-form-host" name="host" required autocomplete="off">
-          </div>
+          <p id="bot-form-auth-warning" class="form-warning" hidden>
+            Changing the authentication mode does not delete the instance's existing auth_cache directory. It may remain unused, and the instance may need to reconnect.
+          </p>
 
-          <div class="field">
-            <label class="field-label" for="bot-form-port">פורט</label>
-            <input id="bot-form-port" name="port" type="number" min="1" max="65535" required inputmode="numeric">
-          </div>
-
-          <div class="field">
-            <label class="field-label" for="bot-form-username">שם משתמש</label>
-            <input id="bot-form-username" name="username" required autocomplete="off">
-          </div>
-
-          <div class="field">
-            <label class="field-label" for="bot-form-auth">אימות</label>
-            <select id="bot-form-auth" name="auth">
-              <option value="microsoft">Microsoft</option>
-              <option value="offline">Offline</option>
-            </select>
-          </div>
-
-          <div class="field">
-            <label class="field-label" for="bot-form-prefix">תחילית פקודות</label>
-            <input id="bot-form-prefix" name="commandPrefix" placeholder="!" autocomplete="off">
-          </div>
-
-          <div class="field field-wide">
-            <label class="field-label" for="bot-form-admins">מנהלים (usernames, מופרדים בפסיק)</label>
-            <input id="bot-form-admins" name="admins" placeholder="Player1, Player2" autocomplete="off">
-          </div>
-
-          <div class="field field-wide">
-            <label class="field-label" for="bot-form-profiles">תיקיית auth_cache (אופציונלי)</label>
-            <input id="bot-form-profiles" name="profilesFolder" placeholder="./auth_cache/<id>" autocomplete="off">
-          </div>
+          <label class="checkbox-field checkbox-card">
+            <input id="bot-form-auto-connect" name="autoConnect" type="checkbox" checked>
+            <span>
+              <strong>Auto-connect</strong>
+              <small>Connect this bot when the application starts.</small>
+            </span>
+          </label>
         </div>
 
-        <p id="bot-form-auth-warning" class="form-warning" hidden>
-          שינוי מצב האימות לא מוחק את תיקיית auth_cache הקיימת של המופע — היא עלולה להישאר ללא שימוש, וייתכן שיידרש חיבור מחדש.
-        </p>
-
-        <label class="checkbox-field">
-          <input id="bot-form-auto-connect" name="autoConnect" type="checkbox" checked>
-          <span>חיבור אוטומטי בעליית האפליקציה</span>
-        </label>
-
-        <div class="dialog-actions">
-          <button type="button" id="bot-form-cancel" class="secondary-button">ביטול</button>
-          <button type="submit" id="bot-form-submit" class="primary-button">שמירה</button>
-        </div>
+        <footer class="dialog-actions">
+          <button type="button" id="bot-form-cancel" class="secondary-button">Cancel</button>
+          <button type="submit" id="bot-form-submit" class="primary-button">Save</button>
+        </footer>
       </form>
     </dialog>
 
-    <dialog id="delete-dialog" class="app-dialog confirm-dialog">
-      <h2>מחיקת מופע</h2>
-      <p>למחוק את המופע <strong id="delete-dialog-id"></strong>?</p>
-      <p class="form-warning">
-        הפעולה תנתק את המופע ותסיר אותו מהרשימה. הנתונים שלו (data, logs ו-auth_cache) לא יימחקו מהדיסק.
-      </p>
-      <div class="dialog-actions">
-        <button type="button" id="delete-dialog-cancel" class="secondary-button">ביטול</button>
-        <button type="button" id="delete-dialog-confirm" class="danger-button">מחיקה</button>
+    <dialog id="delete-dialog" class="app-dialog confirm-dialog" aria-labelledby="delete-dialog-title">
+      <header class="dialog-header">
+        <div class="dialog-title-group">
+          <span class="dialog-icon is-danger" aria-hidden="true">
+            <svg class="icon" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"></path></svg>
+          </span>
+          <div>
+            <p class="eyebrow is-danger">Destructive action</p>
+            <h2 id="delete-dialog-title">Delete instance</h2>
+          </div>
+        </div>
+        <button type="button" id="delete-dialog-close" class="icon-button dialog-close" aria-label="Close dialog" title="Close">
+          <svg class="icon" aria-hidden="true" viewBox="0 0 24 24"><path d="m7 7 10 10M17 7 7 17"></path></svg>
+        </button>
+      </header>
+      <div class="dialog-body confirm-dialog-body">
+        <p>Delete instance <strong id="delete-dialog-id"></strong>?</p>
+        <p class="form-warning">
+          This action disconnects the instance and removes it from the list. Its data, logs, and auth_cache files will remain on disk.
+        </p>
       </div>
+      <footer class="dialog-actions">
+        <button type="button" id="delete-dialog-cancel" class="secondary-button">Cancel</button>
+        <button type="button" id="delete-dialog-confirm" class="danger-button">
+          <svg class="icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"></path></svg>
+          <span>Delete</span>
+        </button>
+      </footer>
     </dialog>
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>

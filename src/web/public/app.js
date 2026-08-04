@@ -4,7 +4,34 @@
   // Keep a long-running/mobile tab bounded. Older durable history remains
   // available from the server after a reload or through pagination.
   const MAX_LIVE_RECORDS = 5000
+  const THEME_STORAGE_KEY = 'tippybot.theme'
+  const ICONS = {
+    sun: [
+      ['circle', { cx: '12', cy: '12', r: '4' }],
+      ['path', { d: 'M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.65 17.65l1.42 1.42M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.65 6.35l1.42-1.42' }]
+    ],
+    moon: [['path', { d: 'M20.5 14.2A8.5 8.5 0 0 1 9.8 3.5 8.5 8.5 0 1 0 20.5 14.2Z' }]],
+    eye: [
+      ['path', { d: 'M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z' }],
+      ['circle', { cx: '12', cy: '12', r: '2.5' }]
+    ],
+    eyeOff: [
+      ['path', { d: 'm3 3 18 18M10.6 6.1A10.5 10.5 0 0 1 12 6c6 0 9.5 6 9.5 6a15 15 0 0 1-2.1 2.8M6.2 6.2C3.8 8 2.5 12 2.5 12s3.5 6 9.5 6c1.2 0 2.3-.2 3.3-.6M9.9 9.9a3 3 0 0 0 4.2 4.2' }]
+    ],
+    play: [['path', { d: 'm8 5 11 7-11 7Z' }]],
+    stop: [['rect', { x: '6', y: '6', width: '12', height: '12', rx: '2' }]],
+    restart: [
+      ['path', { d: 'M20 7v5h-5M4 17v-5h5' }],
+      ['path', { d: 'M6.1 9a7 7 0 0 1 11.4-2L20 9M4 15l2.5 2a7 7 0 0 0 11.4-2' }]
+    ],
+    edit: [
+      ['path', { d: 'm14.5 5.5 4 4M4 20l4.5-1 10-10a2.1 2.1 0 0 0-3-3l-10 10Z' }],
+      ['path', { d: 'm13.5 7.5 3 3' }]
+    ],
+    trash: [['path', { d: 'M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5' }]]
+  }
 
+  setupTheme()
   const page = document.body.dataset.page
   if (page === 'login') setupLoginPage()
   if (page === 'dashboard') setupDashboardPage()
@@ -21,7 +48,7 @@
     toggle.addEventListener('click', () => {
       const visible = passwordInput.type === 'text'
       passwordInput.type = visible ? 'password' : 'text'
-      toggle.textContent = visible ? 'הצגה' : 'הסתרה'
+      setIconButton(toggle, visible ? 'eye' : 'eyeOff', visible ? 'Show password' : 'Hide password')
       passwordInput.focus()
     })
 
@@ -29,13 +56,13 @@
       event.preventDefault()
       error.textContent = ''
       if (!passwordInput.value) {
-        error.textContent = 'יש להזין סיסמה.'
+        error.textContent = 'Enter a password.'
         passwordInput.focus()
         return
       }
 
       submit.disabled = true
-      submit.textContent = 'מתחבר…'
+      submit.textContent = 'Signing in…'
       try {
         const response = await fetch('/api/login', {
           method: 'POST',
@@ -53,16 +80,16 @@
 
         if (response.status === 429) {
           const seconds = Math.max(1, Math.ceil(Number(payload.retryAfterMs || 0) / 1000))
-          error.textContent = `בוצעו ניסיונות רבים מדי. אפשר לנסות שוב בעוד ${seconds} שניות.`
+          error.textContent = `Too many attempts. Try again in ${seconds} seconds.`
         } else {
-          error.textContent = 'הסיסמה שגויה.'
+          error.textContent = 'Incorrect password.'
         }
       } catch {
         passwordInput.value = ''
-        error.textContent = 'לא ניתן להגיע לשרת כרגע.'
+        error.textContent = 'The server is currently unavailable.'
       } finally {
         submit.disabled = false
-        submit.textContent = 'כניסה'
+        submit.textContent = 'Sign in'
         passwordInput.focus()
       }
     })
@@ -92,8 +119,8 @@
       } catch (error) {
         if (isAuthRedirect(error)) return
         elements.grid.setAttribute('aria-busy', 'false')
-        elements.summary.textContent = 'טעינת מצב המופעים נכשלה.'
-        setDashboardStreamState('error', 'שגיאת חיבור')
+        elements.summary.textContent = 'Failed to load instance status.'
+        setDashboardStreamState('error', 'Connection error')
       }
 
       if (!state.stopped) openDashboardStream()
@@ -120,11 +147,11 @@
         window.location.replace('/login')
       })
       source.onopen = () => {
-        setDashboardStreamState('live', 'מחובר בזמן אמת')
+        setDashboardStreamState('live', 'Live connection')
       }
       source.onerror = () => {
         if (state.stopped) return
-        setDashboardStreamState('error', 'מתחבר מחדש…')
+        setDashboardStreamState('error', 'Reconnecting…')
         // EventSource hides the status code of a rejected reconnect. An
         // authenticated request turns an expired session into a clean redirect.
         void apiFetch('/api/dashboard').catch(() => undefined)
@@ -136,7 +163,7 @@
         const instances = dashboardInstances(JSON.parse(event.data))
         if (!instances) return
         renderDashboard(instances)
-        setDashboardStreamState('live', 'מחובר בזמן אמת')
+        setDashboardStreamState('live', 'Live connection')
       } catch {
         // Ignore one malformed event. The next full snapshot can recover the UI.
       }
@@ -178,7 +205,7 @@
       card.className = `dashboard-card status-${status}`
       card.href = `/logs?instance=${encodeURIComponent(snapshot.id)}`
       card.dataset.instanceId = snapshot.id
-      card.setAttribute('aria-label', `${snapshot.id}, ${statusLabel(status)}. מעבר ללוגים של המופע`)
+      card.setAttribute('aria-label', `${snapshot.id}, ${statusLabel(status)}. View instance logs`)
 
       const cardHeader = document.createElement('div')
       cardHeader.className = 'dashboard-card-header'
@@ -195,18 +222,18 @@
       const metrics = document.createElement('dl')
       metrics.className = 'metric-grid'
       metrics.append(
-        createMetric('שרת', formatEndpoint(snapshot.host, snapshot.port), true),
-        createMetric('זמן פעילות', online ? formatDuration(snapshot.uptimeMs) : '—', true),
+        createMetric('Server', formatEndpoint(snapshot.host, snapshot.port), true),
+        createMetric('Uptime', online ? formatDuration(snapshot.uptimeMs) : '—', true),
         createMetric('Ping', online ? formatPing(snapshot.ping) : '—', true),
-        createMetric('מיקום', online ? formatPosition(snapshot.position) : '—', true),
-        createMetric('ממד', online ? displayValue(snapshot.dimension) : '—')
+        createMetric('Position', online ? formatPosition(snapshot.position) : '—', true),
+        createMetric('Dimension', online ? displayValue(snapshot.dimension) : '—')
       )
 
       const vitals = document.createElement('div')
       vitals.className = 'vitals-grid'
       vitals.append(
-        createVital('בריאות', online ? snapshot.health : undefined, 'health'),
-        createVital('מזון', online ? snapshot.food : undefined, 'food')
+        createVital('Health', online ? snapshot.health : undefined, 'health'),
+        createVital('Food', online ? snapshot.food : undefined, 'food')
       )
 
       card.append(cardHeader, metrics, vitals, createTaskPanel(snapshot.activeTask))
@@ -245,7 +272,7 @@
       progress.className = `vital-progress ${kind}`
       progress.max = 20
       progress.value = value
-      progress.setAttribute('aria-label', available ? `${label}: ${formatDecimal(rawValue)} מתוך 20` : `${label}: לא זמין`)
+      progress.setAttribute('aria-label', available ? `${label}: ${formatDecimal(rawValue)} out of 20` : `${label}: unavailable`)
       vital.append(heading, progress)
       return vital
     }
@@ -253,15 +280,15 @@
     function createTaskPanel(task) {
       const panel = document.createElement('section')
       panel.className = 'task-panel'
-      panel.setAttribute('aria-label', 'משימה פעילה')
+      panel.setAttribute('aria-label', 'Active task')
       const heading = document.createElement('div')
       heading.className = 'task-heading'
-      heading.textContent = 'משימה פעילה'
+      heading.textContent = 'Active task'
       panel.append(heading)
 
       if (!isActiveTask(task)) {
         const empty = document.createElement('p')
-        empty.textContent = 'אין משימה פעילה'
+        empty.textContent = 'No active task'
         panel.append(empty)
         return panel
       }
@@ -271,7 +298,7 @@
       name.textContent = task.name
       const details = document.createElement('p')
       details.className = 'task-details'
-      details.textContent = `ביקש/ה: ${task.requestedBy} · זמן ריצה: ${formatDuration(Date.now() - task.startedAt)}`
+      details.textContent = `Requested by: ${task.requestedBy} · Runtime: ${formatDuration(Date.now() - task.startedAt)}`
       panel.append(name, details)
       return panel
     }
@@ -279,10 +306,10 @@
     function createErrorPanel(error, prominent) {
       const panel = document.createElement('section')
       panel.className = `error-panel${prominent ? ' is-prominent' : ''}`
-      panel.setAttribute('aria-label', 'שגיאה אחרונה')
+      panel.setAttribute('aria-label', 'Last error')
       const heading = document.createElement('div')
       heading.className = 'error-heading'
-      heading.textContent = 'שגיאה אחרונה'
+      heading.textContent = 'Last error'
       const message = document.createElement('p')
       message.className = 'error-message'
       message.textContent = error.message
@@ -299,7 +326,7 @@
       const online = instances.filter((instance) => instance.status === 'online').length
       const reconnecting = instances.filter((instance) => instance.status === 'reconnecting').length
       const errored = instances.filter((instance) => instance.status === 'errored').length
-      const summary = `${online} מחוברים · ${reconnecting} מתחברים מחדש · ${errored} בשגיאה`
+      const summary = `${online} online · ${reconnecting} reconnecting · ${errored} errored`
       if (elements.summary.textContent !== summary) elements.summary.textContent = summary
     }
 
@@ -375,13 +402,13 @@
     })
     elements.copySelected.addEventListener('click', () => {
       const chosen = state.records.filter((record) => state.selected.has(record.clientId))
-      void copyRecords(chosen, 'הרשומות שנבחרו הועתקו.')
+      void copyRecords(chosen, 'Selected entries copied.')
     })
     elements.copyRecent.addEventListener('click', () => {
       const requested = clampInteger(elements.copyCount.value, 1, 1000, 20)
       elements.copyCount.value = String(requested)
       const recent = filteredRecords().slice(-requested)
-      void copyRecords(recent, `${recent.length} הרשומות האחרונות הועתקו.`)
+      void copyRecords(recent, `${recent.length} recent entries copied.`)
     })
     setupLogoutButton(elements.logout)
     window.addEventListener('beforeunload', closeStream)
@@ -408,11 +435,11 @@
         if (elements.instance.options.length === 0) {
           const option = document.createElement('option')
           option.value = ''
-          option.textContent = 'לא נמצאו מופעים'
+          option.textContent = 'No instances found'
           elements.instance.append(option)
           elements.instance.disabled = true
-          elements.instanceSummary.textContent = 'BotManager לא מחזיק כרגע מופעים פעילים.'
-          setStreamState('idle', 'אין מופעים')
+          elements.instanceSummary.textContent = 'BotManager does not currently have any active instances.'
+          setStreamState('idle', 'No instances')
           return
         }
 
@@ -425,8 +452,8 @@
         await selectInstance(elements.instance.value)
       } catch (error) {
         if (isAuthRedirect(error)) return
-        elements.instanceSummary.textContent = 'טעינת המופעים נכשלה.'
-        setStreamState('error', 'שגיאת חיבור')
+        elements.instanceSummary.textContent = 'Failed to load instances.'
+        setStreamState('error', 'Connection error')
       }
     }
 
@@ -443,7 +470,7 @@
 
       rememberInstance(instanceId)
       updateInstanceSummary()
-      setStreamState('idle', 'מתחבר…')
+      setStreamState('idle', 'Connecting…')
       openStream(instanceId, generation)
 
       try {
@@ -454,7 +481,7 @@
         renderAll(true)
       } catch (error) {
         if (generation !== state.generation || isAuthRedirect(error)) return
-        showToast('טעינת היסטוריית הלוגים נכשלה.')
+        showToast('Failed to load log history.')
         renderAll()
       }
     }
@@ -473,7 +500,7 @@
       const generation = state.generation
       state.loadingOlder = true
       elements.loadOlder.disabled = true
-      elements.loadOlder.textContent = 'טוען…'
+      setButtonLabel(elements.loadOlder, 'Loading…')
       try {
         const payload = await fetchHistory(state.instanceId, state.nextBefore)
         if (generation !== state.generation) return
@@ -482,11 +509,11 @@
         state.nextBefore = typeof payload.nextBefore === 'string' ? payload.nextBefore : undefined
         renderAll()
       } catch (error) {
-        if (!isAuthRedirect(error)) showToast('טעינת רשומות ישנות נכשלה.')
+        if (!isAuthRedirect(error)) showToast('Failed to load older entries.')
       } finally {
         state.loadingOlder = false
         elements.loadOlder.disabled = false
-        elements.loadOlder.textContent = 'טעינת רשומות ישנות'
+        setButtonLabel(elements.loadOlder, 'Load older entries')
         updateSummary(filteredRecords())
       }
     }
@@ -497,7 +524,7 @@
       let hasOpened = false
 
       source.addEventListener('ready', () => {
-        if (generation === state.generation) setStreamState('live', 'מחובר בזמן אמת')
+        if (generation === state.generation) setStreamState('live', 'Live connection')
       })
       source.addEventListener('auth-expired', () => {
         source.close()
@@ -505,7 +532,7 @@
       })
       source.onopen = () => {
         if (generation !== state.generation) return
-        setStreamState('live', 'מחובר בזמן אמת')
+        setStreamState('live', 'Live connection')
         if (hasOpened) void reconcileAfterReconnect(instanceId, generation)
         hasOpened = true
       }
@@ -521,7 +548,7 @@
       }
       source.onerror = () => {
         if (generation !== state.generation) return
-        setStreamState('error', 'מתחבר מחדש…')
+        setStreamState('error', 'Reconnecting…')
         // EventSource does not expose the HTTP status from a rejected reconnect.
         // A small authenticated request prevents an expired session from
         // retrying a 401 response forever.
@@ -565,7 +592,7 @@
         trimLiveRecords()
         renderAll()
       } catch (error) {
-        if (!isAuthRedirect(error)) showToast('השלמת פער הלוגים לאחר החיבור מחדש נכשלה.')
+        if (!isAuthRedirect(error)) showToast('Failed to recover missing logs after reconnecting.')
       }
     }
 
@@ -630,7 +657,7 @@
       const checkbox = document.createElement('input')
       checkbox.type = 'checkbox'
       checkbox.checked = state.selected.has(record.clientId)
-      checkbox.setAttribute('aria-label', `בחירת רשומת ${entry.level}: ${entry.message}`)
+      checkbox.setAttribute('aria-label', `Select ${entry.level} entry: ${entry.message}`)
       checkbox.addEventListener('change', () => {
         if (checkbox.checked) state.selected.add(record.clientId)
         else state.selected.delete(record.clientId)
@@ -680,8 +707,8 @@
     function updateSummary(visible) {
       const total = state.records.length
       elements.resultCount.textContent = total === visible.length
-        ? `${total} רשומות`
-        : `${visible.length} מתוך ${total} רשומות`
+        ? `${total} entries`
+        : `${visible.length} of ${total} entries`
       elements.empty.hidden = visible.length > 0
       elements.logList.hidden = visible.length === 0
       elements.loadOlder.hidden = !state.nextBefore
@@ -690,8 +717,8 @@
     function updateSelectionState(visible) {
       const selectedCount = state.selected.size
       elements.selectionCount.textContent = selectedCount === 0
-        ? 'לא נבחרו רשומות'
-        : `${selectedCount} רשומות נבחרו`
+        ? 'No entries selected'
+        : `${selectedCount} entries selected`
       elements.copySelected.disabled = selectedCount === 0
       const selectedVisible = visible.filter((record) => state.selected.has(record.clientId)).length
       elements.selectVisible.checked = visible.length > 0 && selectedVisible === visible.length
@@ -717,14 +744,14 @@
 
     async function copyRecords(records, successMessage) {
       if (records.length === 0) {
-        showToast('אין רשומות להעתקה.')
+        showToast('There are no entries to copy.')
         return
       }
       try {
         await writeClipboard(records.map((record) => formatForCopy(record.entry)).join('\n'))
         showToast(successMessage)
       } catch {
-        showToast('ההעתקה נכשלה. יש לאפשר גישה ללוח ההעתקה.')
+        showToast('Copy failed. Allow clipboard access and try again.')
       }
     }
 
@@ -752,6 +779,7 @@
       toast: byId('toast'),
       formDialog: byId('bot-form-dialog'),
       form: byId('bot-form'),
+      formClose: byId('bot-form-close'),
       formTitle: byId('bot-form-title'),
       formError: byId('bot-form-error'),
       formId: byId('bot-form-id'),
@@ -768,6 +796,7 @@
       formSubmit: byId('bot-form-submit'),
       deleteDialog: byId('delete-dialog'),
       deleteDialogId: byId('delete-dialog-id'),
+      deleteClose: byId('delete-dialog-close'),
       deleteCancel: byId('delete-dialog-cancel'),
       deleteConfirm: byId('delete-dialog-confirm')
     }
@@ -785,9 +814,11 @@
     setupLogoutButton(elements.logout)
     elements.retry.addEventListener('click', () => void loadBots())
     elements.addButton.addEventListener('click', () => openFormDialog())
+    elements.formClose.addEventListener('click', () => elements.formDialog.close())
     elements.formCancel.addEventListener('click', () => elements.formDialog.close())
     elements.form.addEventListener('submit', (event) => void handleFormSubmit(event))
     elements.formAuth.addEventListener('change', updateAuthWarning)
+    elements.deleteClose.addEventListener('click', () => elements.deleteDialog.close())
     elements.deleteCancel.addEventListener('click', () => elements.deleteDialog.close())
     elements.deleteConfirm.addEventListener('click', () => void handleDeleteConfirm())
 
@@ -812,7 +843,7 @@
       elements.errorPanel.hidden = true
       elements.empty.hidden = true
       elements.tableWrap.hidden = true
-      elements.summary.textContent = 'טוען מופעים…'
+      elements.summary.textContent = 'Loading instances…'
     }
 
     function showErrorState() {
@@ -820,7 +851,7 @@
       elements.errorPanel.hidden = false
       elements.empty.hidden = true
       elements.tableWrap.hidden = true
-      elements.summary.textContent = 'טעינת הרשימה נכשלה.'
+      elements.summary.textContent = 'Failed to load the list.'
     }
 
     function renderBots(instances) {
@@ -831,13 +862,13 @@
       if (state.instances.length === 0) {
         elements.empty.hidden = false
         elements.tableWrap.hidden = true
-        elements.summary.textContent = 'אין מופעים מוגדרים.'
+        elements.summary.textContent = 'No instances configured.'
         return
       }
 
       elements.empty.hidden = true
       elements.tableWrap.hidden = false
-      elements.summary.textContent = `${state.instances.length} מופעים`
+      elements.summary.textContent = `${state.instances.length} instances`
 
       const fragment = document.createDocumentFragment()
       for (const instance of state.instances) fragment.append(createBotRow(instance))
@@ -869,7 +900,7 @@
 
       const autoConnectCell = document.createElement('td')
       autoConnectCell.append(
-        span(`bool-badge ${instance.autoConnect ? 'is-yes' : 'is-no'}`, instance.autoConnect ? 'כן' : 'לא')
+        span(`bool-badge ${instance.autoConnect ? 'is-yes' : 'is-no'}`, instance.autoConnect ? 'Yes' : 'No')
       )
 
       const actionsCell = document.createElement('td')
@@ -877,22 +908,24 @@
       const isActive = ACTIVE_STATUSES.includes(status)
 
       actionsCell.append(
-        actionButton('חיבור', busy || isActive, () => runInstanceAction(instance.id, 'connect')),
-        actionButton('ניתוק', busy || !isActive, () => runInstanceAction(instance.id, 'disconnect')),
-        actionButton('הפעלה מחדש', busy, () => runInstanceAction(instance.id, 'restart')),
-        actionButton('עריכה', busy, () => openFormDialog(instance)),
-        actionButton('מחיקה', busy, () => openDeleteDialog(instance), 'danger')
+        actionButton('Connect', 'play', busy || isActive, () => runInstanceAction(instance.id, 'connect')),
+        actionButton('Disconnect', 'stop', busy || !isActive, () => runInstanceAction(instance.id, 'disconnect')),
+        actionButton('Restart', 'restart', busy, () => runInstanceAction(instance.id, 'restart')),
+        actionButton('Edit', 'edit', busy, () => openFormDialog(instance)),
+        actionButton('Delete', 'trash', busy, () => openDeleteDialog(instance), 'danger')
       )
 
       row.append(idCell, statusCell, serverCell, usernameCell, authCell, autoConnectCell, actionsCell)
       return row
     }
 
-    function actionButton(label, disabled, onClick, kind) {
+    function actionButton(label, iconName, disabled, onClick, kind) {
       const button = document.createElement('button')
       button.type = 'button'
-      button.className = `text-button compact${kind === 'danger' ? ' is-danger' : ''}`
-      button.textContent = label
+      button.className = `icon-button table-action${kind === 'danger' ? ' is-danger' : ''}`
+      button.setAttribute('aria-label', label)
+      button.title = label
+      button.append(createIcon(iconName))
       button.disabled = disabled
       button.addEventListener('click', onClick)
       return button
@@ -922,7 +955,7 @@
         const payload = await parseJson(response)
         if (!response.ok) throw new Error(describeApiError(payload, response.status))
       } catch (error) {
-        if (!isAuthRedirect(error)) showToast(error.message || 'הפעולה נכשלה.')
+        if (!isAuthRedirect(error)) showToast(error.message || 'The action failed.')
       } finally {
         state.pendingIds.delete(id)
         await loadBots()
@@ -937,7 +970,7 @@
       elements.formError.textContent = ''
       elements.formAuthWarning.hidden = true
 
-      elements.formTitle.textContent = instance ? `עריכת מופע "${instance.id}"` : 'הוספת מופע'
+      elements.formTitle.textContent = instance ? `Edit instance "${instance.id}"` : 'Add instance'
       elements.formId.value = instance ? instance.id : ''
       elements.formId.disabled = Boolean(instance)
       elements.formHost.value = instance ? instance.host : ''
@@ -979,7 +1012,7 @@
 
       state.formSubmitting = true
       elements.formSubmit.disabled = true
-      elements.formSubmit.textContent = 'שומר…'
+      elements.formSubmit.textContent = 'Saving…'
       elements.formError.textContent = ''
 
       try {
@@ -992,15 +1025,15 @@
         if (!response.ok) throw new Error(describeApiError(body, response.status))
 
         elements.formDialog.close()
-        showToast(isEdit ? 'המופע עודכן.' : 'המופע נוסף.')
+        showToast(isEdit ? 'Instance updated.' : 'Instance added.')
         await loadBots()
       } catch (error) {
         if (isAuthRedirect(error)) return
-        elements.formError.textContent = error.message || 'השמירה נכשלה.'
+        elements.formError.textContent = error.message || 'Failed to save the instance.'
       } finally {
         state.formSubmitting = false
         elements.formSubmit.disabled = false
-        elements.formSubmit.textContent = 'שמירה'
+        elements.formSubmit.textContent = 'Save'
       }
     }
 
@@ -1010,7 +1043,7 @@
       state.deleteTargetId = instance.id
       elements.deleteDialogId.textContent = instance.id
       elements.deleteConfirm.disabled = false
-      elements.deleteConfirm.textContent = 'מחיקה'
+      setButtonLabel(elements.deleteConfirm, 'Delete')
       elements.deleteDialog.showModal()
     }
 
@@ -1020,7 +1053,7 @@
 
       state.deleteSubmitting = true
       elements.deleteConfirm.disabled = true
-      elements.deleteConfirm.textContent = 'מוחק…'
+      setButtonLabel(elements.deleteConfirm, 'Deleting…')
 
       try {
         const response = await apiFetch(`/api/bots/${encodeURIComponent(id)}`, { method: 'DELETE' })
@@ -1029,17 +1062,17 @@
           throw new Error(describeApiError(body, response.status))
         }
         elements.deleteDialog.close()
-        showToast(`המופע "${id}" נמחק.`)
+        showToast(`Instance "${id}" deleted.`)
       } catch (error) {
         if (!isAuthRedirect(error)) {
           elements.deleteDialog.close()
-          showToast(error.message || 'המחיקה נכשלה.')
+          showToast(error.message || 'Failed to delete the instance.')
         }
       } finally {
         state.deleteSubmitting = false
         state.deleteTargetId = undefined
         elements.deleteConfirm.disabled = false
-        elements.deleteConfirm.textContent = 'מחיקה'
+        setButtonLabel(elements.deleteConfirm, 'Delete')
         // Refresh even on failure: a 404 here usually means another tab
         // already deleted (or renamed) this instance, and the table must
         // stop showing it rather than leaving a stale, now-illegal row.
@@ -1051,10 +1084,10 @@
 
     function describeApiError(body, status) {
       if (body && typeof body.error === 'string' && body.error) return body.error
-      if (status === 400) return 'הבקשה אינה תקינה.'
-      if (status === 404) return 'המופע לא נמצא.'
-      if (status === 409) return 'הפעולה לא אפשרית במצב הנוכחי.'
-      return 'אירעה שגיאה. נסו שוב.'
+      if (status === 400) return 'The request is invalid.'
+      if (status === 404) return 'The instance was not found.'
+      if (status === 409) return 'The action is not available in the current state.'
+      return 'An error occurred. Try again.'
     }
 
     function showToast(message) {
@@ -1074,6 +1107,48 @@
         window.location.replace('/login')
       }
     })
+  }
+
+  function setupTheme() {
+    const root = document.documentElement
+    const toggle = byId('theme-toggle')
+    const media = window.matchMedia('(prefers-color-scheme: light)')
+    let savedTheme
+
+    try {
+      const stored = localStorage.getItem(THEME_STORAGE_KEY)
+      if (stored === 'light' || stored === 'dark') savedTheme = stored
+    } catch {
+      // Theme selection still works for this page when storage is unavailable.
+    }
+
+    applyTheme(savedTheme || (media.matches ? 'light' : 'dark'))
+
+    toggle.addEventListener('click', () => {
+      const nextTheme = root.dataset.theme === 'light' ? 'dark' : 'light'
+      savedTheme = nextTheme
+      try {
+        localStorage.setItem(THEME_STORAGE_KEY, nextTheme)
+      } catch {
+        // Ignore storage restrictions; the active page still updates.
+      }
+      applyTheme(nextTheme)
+    })
+
+    const followSystemTheme = (event) => {
+      if (!savedTheme) applyTheme(event.matches ? 'light' : 'dark')
+    }
+    if (typeof media.addEventListener === 'function') media.addEventListener('change', followSystemTheme)
+
+    function applyTheme(theme) {
+      root.dataset.theme = theme
+      const nextTheme = theme === 'light' ? 'dark' : 'light'
+      const label = `Switch to ${nextTheme} mode`
+      setIconButton(toggle, theme === 'light' ? 'moon' : 'sun', label)
+      toggle.setAttribute('aria-pressed', String(theme === 'light'))
+      const themeColor = document.querySelector('meta[name="theme-color"]')
+      if (themeColor) themeColor.content = theme === 'light' ? '#f3f7f5' : '#0d1113'
+    }
   }
 
   function dashboardInstances(payload) {
@@ -1167,17 +1242,17 @@
   }
 
   function formatCoordinate(value) {
-    return new Intl.NumberFormat('he-IL', { maximumFractionDigits: 2 }).format(value)
+    return new Intl.NumberFormat('en-GB', { maximumFractionDigits: 2 }).format(value)
   }
 
   function formatDecimal(value) {
-    return new Intl.NumberFormat('he-IL', { maximumFractionDigits: 1 }).format(value)
+    return new Intl.NumberFormat('en-GB', { maximumFractionDigits: 1 }).format(value)
   }
 
   function formatDateTime(value) {
     const date = new Date(value)
     if (Number.isNaN(date.getTime())) return '—'
-    return new Intl.DateTimeFormat('he-IL', {
+    return new Intl.DateTimeFormat('en-GB', {
       dateStyle: 'short',
       timeStyle: 'medium',
       hour12: false
@@ -1243,7 +1318,7 @@
   function formatTimestamp(timestamp) {
     const date = new Date(timestamp)
     if (Number.isNaN(date.getTime())) return timestamp
-    return new Intl.DateTimeFormat('he-IL', {
+    return new Intl.DateTimeFormat('en-GB', {
       month: '2-digit',
       day: '2-digit',
       hour: '2-digit',
@@ -1273,13 +1348,13 @@
 
   function statusLabel(status) {
     const labels = {
-      disconnected: 'מנותק',
-      connecting: 'מתחבר',
-      online: 'מחובר',
-      reconnecting: 'מתחבר מחדש',
-      errored: 'שגיאה'
+      disconnected: 'Disconnected',
+      connecting: 'Connecting',
+      online: 'Online',
+      reconnecting: 'Reconnecting',
+      errored: 'Error'
     }
-    return labels[status] || 'מצב לא ידוע'
+    return labels[status] || 'Unknown status'
   }
 
   function clampInteger(raw, minimum, maximum, fallback) {
@@ -1324,6 +1399,34 @@
     element.className = className
     element.textContent = text
     return element
+  }
+
+  function createIcon(name) {
+    const definitions = ICONS[name]
+    if (!definitions) throw new Error(`Unknown icon: ${name}`)
+    const namespace = 'http://www.w3.org/2000/svg'
+    const svg = document.createElementNS(namespace, 'svg')
+    svg.classList.add('icon')
+    svg.setAttribute('viewBox', '0 0 24 24')
+    svg.setAttribute('aria-hidden', 'true')
+    for (const [tag, attributes] of definitions) {
+      const element = document.createElementNS(namespace, tag)
+      for (const [attribute, value] of Object.entries(attributes)) element.setAttribute(attribute, value)
+      svg.append(element)
+    }
+    return svg
+  }
+
+  function setIconButton(button, iconName, label) {
+    button.replaceChildren(createIcon(iconName))
+    button.setAttribute('aria-label', label)
+    button.title = label
+  }
+
+  function setButtonLabel(button, label) {
+    const text = button.querySelector('span')
+    if (text) text.textContent = label
+    else button.textContent = label
   }
 
   function byId(id) {
