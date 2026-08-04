@@ -34,7 +34,7 @@ export function loadWebConfig(env: NodeJS.ProcessEnv = process.env): WebConfig {
   const host =
     env.WEB_HOST === undefined ? DEFAULT_WEB_HOST : requireNonEmpty(env.WEB_HOST, 'WEB_HOST').trim()
   const port = parseInteger(env.WEB_PORT, 'WEB_PORT', DEFAULT_WEB_PORT, 1, 65_535)
-  const password = requireNonEmpty(env.WEB_PASSWORD, 'WEB_PASSWORD')
+  const password = requireNonEmpty(env.WEB_PASSWORD, 'WEB_PASSWORD').trim()
   const secureCookies = parseBoolean(
     env.WEB_SECURE_COOKIES,
     'WEB_SECURE_COOKIES',

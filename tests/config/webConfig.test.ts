@@ -27,6 +27,10 @@ describe('loadWebConfig', () => {
     })
   })
 
+  it('trims WEB_PASSWORD, since a quoted .env value can carry invisible surrounding whitespace dotenv does not strip', () => {
+    expect(loadWebConfig({ WEB_PASSWORD: '  secret  ' }).password).toBe('secret')
+  })
+
   it('loads explicit values and recognizes false case-insensitively', () => {
     expect(
       loadWebConfig({

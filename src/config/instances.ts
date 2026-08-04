@@ -26,9 +26,6 @@ export function loadBotInstances(configPath = resolveConfigPath()): IBotConfig[]
   }
 
   const rawInstances = (parsed as { instances: unknown[] }).instances
-  if (rawInstances.length === 0) {
-    throw new Error(`${configPath}: "instances" array is empty -- configure at least one bot.`)
-  }
 
   const seenIds = new Set<string>()
   return rawInstances.map((entry, index) => {

@@ -101,10 +101,10 @@ describe('loadBotInstances', () => {
     expect(() => loadBotInstances(configPath)).toThrow(/"instances" array/)
   })
 
-  it('throws when "instances" is empty', async () => {
+  it('loads successfully with an empty instances array', async () => {
     await writeConfig({ instances: [] })
 
-    expect(() => loadBotInstances(configPath)).toThrow(/empty/)
+    expect(loadBotInstances(configPath)).toEqual([])
   })
 
   it('throws on a missing or invalid id', async () => {
