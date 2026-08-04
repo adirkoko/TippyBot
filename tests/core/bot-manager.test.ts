@@ -47,7 +47,9 @@ function fakeHandle(config: IBotConfig): IBotInstanceHandle {
     getLastError: () => undefined,
     getSnapshot: () => fakeSnapshot(config),
     connect: () => Promise.resolve(),
-    disconnect: () => Promise.resolve()
+    disconnect: () => Promise.resolve(),
+    authenticate: () => Promise.resolve(),
+    cancelAuthentication: () => Promise.resolve()
   }
 }
 
@@ -417,6 +419,74 @@ describe('BotManager CRUD', () => {
       expect(manager.getInstance('steve')?.config.host).toBe('new-host')
       expect(manager.getInstance('alex')).toBeDefined()
       expect(manager.getInstance('bob')).toBeDefined()
+    })
+  })
+
+  describe('authenticateInstance / cancelAuthentication', () => {
+    function authTrackingHandle(config: IBotConfig, calls: string[]): IBotInstanceHandle {
+      return {
+        ...fakeHandle(config),
+        authenticate: () => {
+          calls.push(`authenticate:${config.id}`)
+          return Promise.resolve()
+        },
+        cancelAuthentication: () => {
+          calls.push(`cancel:${config.id}`)
+          return Promise.resolve()
+        }
+      }
+    }
+
+    it('delegates to the handle', async () => {
+      const calls: string[] = []
+      const start = (config: IBotConfig): IBotInstanceHandle => authTrackingHandle(config, calls)
+      const manager = new BotManager([fakeConfig('steve')], start, new Map(), configPath)
+      manager.startAll()
+
+      await manager.authenticateInstance('steve')
+      await manager.cancelAuthentication('steve')
+
+      expect(calls).toEqual(['authenticate:steve', 'cancel:steve'])
+    })
+
+    it('rejects for an unknown id', async () => {
+      const manager = new BotManager([], undefined, new Map(), configPath)
+      await expect(manager.authenticateInstance('missing')).rejects.toThrow(/does not exist/)
+      await expect(manager.cancelAuthentication('missing')).rejects.toThrow(/does not exist/)
+    })
+
+    it('does not queue behind an in-flight CRUD operation on a different instance', async () => {
+      const calls: string[] = []
+      let releaseSlowAdd: (() => void) | undefined
+      const slowAddBlocked = new Promise<void>((resolve) => {
+        releaseSlowAdd = resolve
+      })
+
+      const start = (config: IBotConfig): IBotInstanceHandle => authTrackingHandle(config, calls)
+      const manager = new BotManager([fakeConfig('steve')], start, new Map(), configPath)
+      manager.startAll()
+
+      // Occupies the CRUD queue with a save that won't resolve until released.
+      const slowLogStore = {
+        ready: () => Promise.resolve(),
+        close: () => Promise.resolve()
+      } as unknown as LogStore
+      const originalWriteFile = fs.writeFile
+      const writeSpy = vi.spyOn(fs, 'writeFile').mockImplementationOnce(async (...args) => {
+        await slowAddBlocked
+        return originalWriteFile(...(args as Parameters<typeof fs.writeFile>))
+      })
+
+      const slowAdd = manager.addInstance(fakeConfig('alex'), slowLogStore)
+
+      // authenticateInstance on the unrelated, already-existing 'steve' must
+      // not wait behind that pending add.
+      await manager.authenticateInstance('steve')
+      expect(calls).toEqual(['authenticate:steve'])
+
+      releaseSlowAdd?.()
+      await slowAdd
+      writeSpy.mockRestore()
     })
   })
 })

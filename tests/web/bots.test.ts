@@ -9,7 +9,12 @@ import { BotManager } from '../../src/core/bot-manager'
 import { BotInstanceConflictError } from '../../src/core/bot-errors'
 import type { IBotConfig } from '../../src/interfaces/config'
 import type { LogStore } from '../../src/core/log-store'
-import type { BotInstanceStatus, IBotInstanceHandle } from '../../src/interfaces/bot-instance'
+import type {
+  BotInstanceStatus,
+  IBotInstanceHandle,
+  MicrosoftAuthStatus,
+  MicrosoftDeviceCode
+} from '../../src/interfaces/bot-instance'
 import { SessionStore } from '../../src/web/auth/session'
 import { createWebServer } from '../../src/web/server'
 
@@ -44,6 +49,7 @@ function fakeConfig(id: string, overrides: Partial<IBotConfig> = {}): IBotConfig
     commandPrefix: '!',
     admins: [],
     autoConnect: true,
+    msaCacheKey: `${id}Bot`,
     ...overrides
   }
 }
@@ -52,16 +58,36 @@ function fakeLogStore(): LogStore {
   return { ready: () => Promise.resolve(), close: () => Promise.resolve() } as unknown as LogStore
 }
 
-/** A minimal but real state machine (no network), so connect()/disconnect() guard rejections behave like the real BotInstance. */
-function trackingFakeHandle(config: IBotConfig): IBotInstanceHandle {
+interface AuthAttemptControl {
+  resolve: (profileName: string) => void
+  reject: (err: Error) => void
+}
+
+const FAKE_DEVICE_CODE: MicrosoftDeviceCode = {
+  userCode: 'ABCD-EFGH',
+  verificationUri: 'https://www.microsoft.com/link',
+  message: 'To sign in, use a web browser to open https://www.microsoft.com/link and enter ABCD-EFGH.'
+}
+
+/** A minimal but real state machine (no network), so connect()/disconnect()/authenticate()/cancelAuthentication() guard rejections behave like the real BotInstance. */
+function trackingFakeHandle(config: IBotConfig, authAttempts: AuthAttemptControl[] = []): IBotInstanceHandle {
   let status: BotInstanceStatus = 'disconnected'
   let lastError: { message: string; at: number } | undefined
+  let authStatus: MicrosoftAuthStatus | undefined = config.auth === 'microsoft' ? 'unknown' : undefined
+  let authError: { message: string; at: number } | undefined
+  let minecraftProfileName: string | undefined
+  let deviceCode: MicrosoftDeviceCode | undefined
+  let currentAuthAttempt: object | undefined
 
   const handle: IBotInstanceHandle = {
     id: config.id,
     config,
     getStatus: () => status,
     getLastError: () => lastError,
+    getAuthStatus: () => authStatus,
+    getAuthError: () => authError,
+    getMinecraftProfileName: () => minecraftProfileName,
+    getDeviceCode: () => deviceCode,
     getSnapshot: () => ({
       id: config.id,
       status,
@@ -75,9 +101,21 @@ function trackingFakeHandle(config: IBotConfig): IBotInstanceHandle {
       food: undefined,
       position: undefined,
       dimension: undefined,
-      activeTask: undefined
+      activeTask: undefined,
+      authStatus,
+      authError,
+      minecraftProfileName,
+      deviceCode
     }),
     connect: () => {
+      if (!config.host) {
+        return Promise.reject(new BotInstanceConflictError(`Bot instance "${config.id}" has no host configured yet.`))
+      }
+      if (authStatus === 'authenticating') {
+        return Promise.reject(
+          new BotInstanceConflictError(`Bot instance "${config.id}" is currently authenticating; wait for it to finish or cancel it first.`)
+        )
+      }
       if (status === 'connecting' || status === 'online' || status === 'reconnecting') {
         return Promise.reject(new BotInstanceConflictError(`Bot instance "${config.id}" is already ${status}.`))
       }
@@ -92,14 +130,74 @@ function trackingFakeHandle(config: IBotConfig): IBotInstanceHandle {
       }
       status = 'disconnected'
       return Promise.resolve()
+    },
+    authenticate: () => {
+      if (config.auth !== 'microsoft') {
+        return Promise.reject(new BotInstanceConflictError(`Bot instance "${config.id}" does not use Microsoft authentication.`))
+      }
+      if (status === 'connecting' || status === 'online' || status === 'reconnecting') {
+        return Promise.reject(new BotInstanceConflictError(`Bot instance "${config.id}" is currently ${status}; disconnect first.`))
+      }
+      if (authStatus === 'authenticating') {
+        return Promise.reject(new BotInstanceConflictError(`Bot instance "${config.id}" is already authenticating.`))
+      }
+
+      authStatus = 'authenticating'
+      authError = undefined
+      deviceCode = FAKE_DEVICE_CODE
+      const attempt = {}
+      currentAuthAttempt = attempt
+
+      return new Promise<void>((resolve, reject) => {
+        authAttempts.push({
+          // Mirrors BotInstance's own staleness guard: a cancelled or
+          // superseded attempt's eventual result must not overwrite newer
+          // state -- without this, the fake wouldn't accurately model what
+          // these tests are trying to verify.
+          resolve: (profileName) => {
+            if (currentAuthAttempt !== attempt) return resolve()
+            authStatus = 'authenticated'
+            minecraftProfileName = profileName
+            deviceCode = undefined
+            resolve()
+          },
+          reject: (err) => {
+            // Matches BotInstance.doAuthenticate(): a superseded failure
+            // resolves quietly instead of rejecting -- nobody is waiting on
+            // this specific attempt's outcome anymore.
+            if (currentAuthAttempt !== attempt) return resolve()
+            authStatus = 'auth_error'
+            authError = { message: err.message, at: Date.now() }
+            deviceCode = undefined
+            reject(err)
+          }
+        })
+      })
+    },
+    cancelAuthentication: () => {
+      if (authStatus !== 'authenticating') {
+        return Promise.reject(new BotInstanceConflictError(`Bot instance "${config.id}" is not currently authenticating.`))
+      }
+      currentAuthAttempt = undefined
+      authStatus = 'unauthenticated'
+      deviceCode = undefined
+      return Promise.resolve()
     }
   }
   return handle
 }
 
-async function launch(initialConfigs: IBotConfig[] = []): Promise<{ baseUrl: string; manager: BotManager }> {
+async function launch(
+  initialConfigs: IBotConfig[] = [],
+  authAttempts: AuthAttemptControl[] = []
+): Promise<{ baseUrl: string; manager: BotManager }> {
   await fs.writeFile(configPath, JSON.stringify({ instances: initialConfigs }), 'utf8')
-  const manager = new BotManager(initialConfigs, trackingFakeHandle, new Map(), configPath)
+  const manager = new BotManager(
+    initialConfigs,
+    (config) => trackingFakeHandle(config, authAttempts),
+    new Map(),
+    configPath
+  )
   manager.startAll()
 
   activeServer = createWebServer({
@@ -144,10 +242,12 @@ describe('bot management routes', () => {
       fetch(`${baseUrl}/api/bots/steve`, { method: 'DELETE' }),
       fetch(`${baseUrl}/api/bots/steve/connect`, { method: 'POST' }),
       fetch(`${baseUrl}/api/bots/steve/disconnect`, { method: 'POST' }),
-      fetch(`${baseUrl}/api/bots/steve/restart`, { method: 'POST' })
+      fetch(`${baseUrl}/api/bots/steve/restart`, { method: 'POST' }),
+      fetch(`${baseUrl}/api/bots/steve/authenticate`, { method: 'POST' }),
+      fetch(`${baseUrl}/api/bots/steve/authenticate`, { method: 'DELETE' })
     ])
 
-    expect(results.map((r) => r.status)).toEqual([401, 401, 401, 401, 401, 401, 401])
+    expect(results.map((r) => r.status)).toEqual([401, 401, 401, 401, 401, 401, 401, 401, 401])
   })
 
   describe('GET /api/bots', () => {
@@ -169,9 +269,14 @@ describe('bot management routes', () => {
           commandPrefix: '!',
           admins: ['playerone'],
           profilesFolder: undefined,
+          msaCacheKey: 'steveBot',
           autoConnect: true,
           status: 'online', // startAll() already connected it since autoConnect: true
-          lastError: undefined
+          lastError: undefined,
+          authStatus: undefined, // 'offline' auth
+          authError: undefined,
+          minecraftProfileName: undefined,
+          deviceCode: undefined
         }
       ])
     })
@@ -196,9 +301,14 @@ describe('bot management routes', () => {
         'commandPrefix',
         'admins',
         'profilesFolder',
+        'msaCacheKey',
         'autoConnect',
         'status',
-        'lastError'
+        'lastError',
+        'authStatus',
+        'authError',
+        'minecraftProfileName',
+        'deviceCode'
       ])
       expect(Object.keys(body.instances[0]).every((key) => allowedKeys.has(key))).toBe(true)
       // profilesFolder is a path, not file content -- confirm it's the path we set, nothing more.
@@ -369,6 +479,37 @@ describe('bot management routes', () => {
       expect(raw.instances[0].host).toBe('new-host.example.com')
     })
 
+    it('preserves msaCacheKey across an edit that only adds a host, when the client sends it back unchanged', async () => {
+      const { baseUrl } = await launch()
+      const cookie = await login(baseUrl)
+
+      const created = await fetch(`${baseUrl}/api/bots`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Cookie: cookie },
+        body: JSON.stringify({ id: 'steve', auth: 'microsoft', autoConnect: false })
+      })
+      const createdBody = await created.json()
+      expect(createdBody.msaCacheKey).toBe('steve') // auto-generated from id
+
+      const updated = await fetch(`${baseUrl}/api/bots/steve`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Cookie: cookie },
+        body: JSON.stringify({
+          id: 'steve',
+          host: '127.0.0.1',
+          port: 25565,
+          auth: 'microsoft',
+          msaCacheKey: createdBody.msaCacheKey,
+          autoConnect: false
+        })
+      })
+
+      expect(updated.status).toBe(200)
+      const updatedBody = await updated.json()
+      expect(updatedBody.msaCacheKey).toBe('steve')
+      expect(updatedBody.host).toBe('127.0.0.1')
+    })
+
     it('rejects an attempt to change the id with 400, not 500 or a silent id change', async () => {
       const { baseUrl } = await launch([fakeConfig('steve')])
       const cookie = await login(baseUrl)
@@ -478,6 +619,190 @@ describe('bot management routes', () => {
       )
 
       expect(results.map((r) => r.status)).toEqual([404, 404, 404])
+    })
+  })
+
+  describe('authenticate / cancel authentication', () => {
+    it('starts authentication and shows the device code in the response, from a single click', async () => {
+      const authAttempts: AuthAttemptControl[] = []
+      const { baseUrl } = await launch(
+        [fakeConfig('steve', { auth: 'microsoft', autoConnect: false })],
+        authAttempts
+      )
+      const cookie = await login(baseUrl)
+
+      const response = await fetch(`${baseUrl}/api/bots/steve/authenticate`, {
+        method: 'POST',
+        headers: { Cookie: cookie }
+      })
+
+      expect(response.status).toBe(200)
+      const body = await response.json()
+      expect(body.authStatus).toBe('authenticating')
+      expect(body.deviceCode).toEqual({
+        userCode: 'ABCD-EFGH',
+        verificationUri: 'https://www.microsoft.com/link',
+        message: expect.stringContaining('ABCD-EFGH')
+      })
+      expect(authAttempts).toHaveLength(1) // exactly one device code requested
+
+      authAttempts[0].resolve('RealMcName')
+    })
+
+    it('rejects a double-click with 409 instead of requesting a second device code', async () => {
+      const authAttempts: AuthAttemptControl[] = []
+      const { baseUrl } = await launch(
+        [fakeConfig('steve', { auth: 'microsoft', autoConnect: false })],
+        authAttempts
+      )
+      const cookie = await login(baseUrl)
+
+      const [first, second] = await Promise.all([
+        fetch(`${baseUrl}/api/bots/steve/authenticate`, { method: 'POST', headers: { Cookie: cookie } }),
+        fetch(`${baseUrl}/api/bots/steve/authenticate`, { method: 'POST', headers: { Cookie: cookie } })
+      ])
+
+      const statuses = [first.status, second.status].sort()
+      expect(statuses).toEqual([200, 409])
+      expect(authAttempts).toHaveLength(1)
+
+      authAttempts[0].resolve('RealMcName')
+    })
+
+    it('cancel updates the UI immediately and ignores a later completion of the old attempt', async () => {
+      const authAttempts: AuthAttemptControl[] = []
+      const { baseUrl } = await launch(
+        [fakeConfig('steve', { auth: 'microsoft', autoConnect: false })],
+        authAttempts
+      )
+      const cookie = await login(baseUrl)
+
+      await fetch(`${baseUrl}/api/bots/steve/authenticate`, { method: 'POST', headers: { Cookie: cookie } })
+      const cancelResponse = await fetch(`${baseUrl}/api/bots/steve/authenticate`, {
+        method: 'DELETE',
+        headers: { Cookie: cookie }
+      })
+
+      expect(cancelResponse.status).toBe(200)
+      const cancelBody = await cancelResponse.json()
+      expect(cancelBody.authStatus).toBe('unauthenticated')
+
+      // The old (cancelled) attempt finally "completes" -- must not resurrect 'authenticated'.
+      authAttempts[0].resolve('ShouldBeIgnored')
+
+      const after = await fetch(`${baseUrl}/api/bots`, { headers: { Cookie: cookie } })
+      const afterBody = await after.json()
+      expect(afterBody.instances[0].authStatus).toBe('unauthenticated')
+      expect(afterBody.instances[0].minecraftProfileName).toBeUndefined()
+    })
+
+    it('cancel returns 409 when nothing is authenticating', async () => {
+      const { baseUrl } = await launch([fakeConfig('steve', { auth: 'microsoft', autoConnect: false })])
+      const cookie = await login(baseUrl)
+
+      const response = await fetch(`${baseUrl}/api/bots/steve/authenticate`, {
+        method: 'DELETE',
+        headers: { Cookie: cookie }
+      })
+
+      expect(response.status).toBe(409)
+    })
+
+    it('a successful authentication shows the real Minecraft profile name', async () => {
+      const authAttempts: AuthAttemptControl[] = []
+      const { baseUrl } = await launch(
+        [fakeConfig('steve', { auth: 'microsoft', autoConnect: false })],
+        authAttempts
+      )
+      const cookie = await login(baseUrl)
+
+      await fetch(`${baseUrl}/api/bots/steve/authenticate`, { method: 'POST', headers: { Cookie: cookie } })
+      authAttempts[0].resolve('RealMcName')
+
+      const response = await fetch(`${baseUrl}/api/bots`, { headers: { Cookie: cookie } })
+      const body = await response.json()
+      expect(body.instances[0].authStatus).toBe('authenticated')
+      expect(body.instances[0].minecraftProfileName).toBe('RealMcName')
+      expect(body.instances[0].deviceCode).toBeUndefined()
+    })
+
+    it('a failed authentication shows a clear auth_error', async () => {
+      const authAttempts: AuthAttemptControl[] = []
+      const { baseUrl } = await launch(
+        [fakeConfig('steve', { auth: 'microsoft', autoConnect: false })],
+        authAttempts
+      )
+      const cookie = await login(baseUrl)
+
+      await fetch(`${baseUrl}/api/bots/steve/authenticate`, { method: 'POST', headers: { Cookie: cookie } })
+      authAttempts[0].reject(new Error('device code expired'))
+
+      const response = await fetch(`${baseUrl}/api/bots`, { headers: { Cookie: cookie } })
+      const body = await response.json()
+      expect(body.instances[0].authStatus).toBe('auth_error')
+      expect(body.instances[0].authError.message).toBe('device code expired')
+    })
+
+    it('an unconfigured instance (no host) can authenticate but not connect', async () => {
+      const authAttempts: AuthAttemptControl[] = []
+      const { baseUrl } = await launch(
+        [fakeConfig('steve', { auth: 'microsoft', autoConnect: false, host: undefined, port: undefined })],
+        authAttempts
+      )
+      const cookie = await login(baseUrl)
+
+      const authResponse = await fetch(`${baseUrl}/api/bots/steve/authenticate`, {
+        method: 'POST',
+        headers: { Cookie: cookie }
+      })
+      expect(authResponse.status).toBe(200)
+      authAttempts[0].resolve('RealMcName')
+
+      const connectResponse = await fetch(`${baseUrl}/api/bots/steve/connect`, {
+        method: 'POST',
+        headers: { Cookie: cookie }
+      })
+      expect(connectResponse.status).toBe(409)
+      const connectBody = await connectResponse.json()
+      expect(connectBody.error).toMatch(/no host configured/)
+    })
+
+    it('returns 409 for an offline-auth instance', async () => {
+      const { baseUrl } = await launch([fakeConfig('steve')]) // default auth: 'offline'
+      const cookie = await login(baseUrl)
+
+      const response = await fetch(`${baseUrl}/api/bots/steve/authenticate`, {
+        method: 'POST',
+        headers: { Cookie: cookie }
+      })
+
+      expect(response.status).toBe(409)
+      const body = await response.json()
+      expect(body.error).toMatch(/does not use Microsoft authentication/)
+    })
+
+    it('returns 409 for an instance that is currently connected', async () => {
+      const { baseUrl } = await launch([fakeConfig('steve', { auth: 'microsoft' })]) // autoConnect: true -> online
+      const cookie = await login(baseUrl)
+
+      const response = await fetch(`${baseUrl}/api/bots/steve/authenticate`, {
+        method: 'POST',
+        headers: { Cookie: cookie }
+      })
+
+      expect(response.status).toBe(409)
+    })
+
+    it('returns 404 for an unknown id', async () => {
+      const { baseUrl } = await launch()
+      const cookie = await login(baseUrl)
+
+      const results = await Promise.all([
+        fetch(`${baseUrl}/api/bots/missing/authenticate`, { method: 'POST', headers: { Cookie: cookie } }),
+        fetch(`${baseUrl}/api/bots/missing/authenticate`, { method: 'DELETE', headers: { Cookie: cookie } })
+      ])
+
+      expect(results.map((r) => r.status)).toEqual([404, 404])
     })
   })
 

@@ -984,6 +984,7 @@ fieldset legend {
 .status-badge.status-reconnecting { color: var(--warn); }
 .status-badge.status-errored { color: var(--error); }
 .status-badge.status-disconnected { color: var(--muted); }
+.status-badge.status-unconfigured { color: var(--muted); border-style: dashed; }
 
 .metric-grid {
   display: grid;
@@ -1322,6 +1323,87 @@ fieldset legend {
 
 .bool-badge.is-no {
   color: var(--muted);
+}
+
+.auth-mode {
+  display: block;
+  font-weight: 700;
+}
+
+.auth-status-badge {
+  display: inline-block;
+  margin-block-start: 4px;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 0.68rem;
+  font-weight: 750;
+}
+
+.auth-status-badge.auth-status-unknown,
+.auth-status-badge.auth-status-unauthenticated { color: var(--muted); }
+.auth-status-badge.auth-status-authenticating { color: var(--info); }
+.auth-status-badge.auth-status-authenticated { color: var(--accent); }
+.auth-status-badge.auth-status-auth_error { color: var(--error); }
+
+.device-code-panel {
+  margin-block: 10px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 14px 16px;
+  background: var(--surface-raised);
+  text-align: center;
+}
+
+.device-code {
+  margin: 8px 0;
+  color: var(--accent);
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  font-size: 1.6rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.device-code-link {
+  color: var(--info);
+  font-size: 0.85rem;
+}
+
+.form-note {
+  margin: 4px 2px 14px;
+  color: var(--muted);
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
+.field-hint {
+  display: block;
+  margin-block-start: 4px;
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.advanced-settings {
+  margin-block: 12px 6px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 4px 14px;
+}
+
+.advanced-settings summary {
+  padding: 10px 0;
+  color: var(--label);
+  font-size: 0.85rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.advanced-settings[open] summary {
+  border-bottom: 1px solid var(--line);
+}
+
+.advanced-settings .form-grid {
+  margin-block: 14px;
 }
 
 .bots-heading-actions {

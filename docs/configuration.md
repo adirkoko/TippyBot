@@ -32,14 +32,15 @@ Then edit `bots.config.json` with your server and account details. See [multi-in
 | Field | Required | Description |
 |---|---|---|
 | `id` | yes | Unique identifier for this instance. 1-32 characters, letters/digits/`_`/`-` only. Namespaces this instance's `data/`, `auth_cache/`, `logs/`, and console label — see [multi-instance.md](multi-instance.md) |
-| `host` | yes | Server address to connect to |
-| `port` | yes | Server port |
-| `username` | yes | Account username. With `microsoft` auth this can be anything (the real identity comes from the Microsoft login); with `offline` auth this **is** the bot's in-game name |
+| `host` | no | Server address to connect to. Absent (alongside `port`) makes this instance "unconfigured" — it exists and, for `microsoft` auth, can be signed in, but `connect()`/`autoConnect`/reconnect are all no-ops until a host is set. See [Unconfigured instances](multi-instance.md#microsoft-authentication) |
+| `port` | no | Server port. Defaults to `25565` whenever `host` is given without one; stays absent alongside an absent `host` |
+| `username` | depends | Account username. With `offline` auth this **is** the bot's in-game name and stays required. With `microsoft` auth the real identity comes from the Microsoft login, so this is only ever a technical placeholder — the `/bots` form doesn't ask for it at all, and it defaults to `id` when absent |
 | `auth` | yes | `microsoft` or `offline` |
 | `commandPrefix` | no | Chat command prefix, defaults to `!` |
 | `admins` | no | Minecraft usernames granted permanent `Admin` access on this instance. See [Admins](#admins) below |
 | `profilesFolder` | no | Where Microsoft auth tokens are cached, defaults to `./auth_cache/<id>` |
-| `autoConnect` | no | Whether this instance connects automatically at boot (or immediately after being added). **Defaults to `true` when the field is absent** — every `bots.config.json` written before this field existed keeps auto-connecting exactly as before. Set to `false` to keep an instance registered but disconnected until something explicitly connects it (see [multi-instance.md](multi-instance.md#botmanager-instance-lifecycle) and [web.md](web.md#bots-page-instance-management)) |
+| `msaCacheKey` | no | Internal, stable identity used only as the local sign-in cache key for `microsoft` auth — never shown to the user, unrelated to the account's real Minecraft name. Defaults to the resolved `username`, so an instance saved before this field existed keeps its existing cached token. Meaningless for `offline` auth. See [Microsoft authentication](multi-instance.md#microsoft-authentication) |
+| `autoConnect` | no | Whether this instance connects automatically at boot (or immediately after being added). **Defaults to `true` when the field is absent** — every `bots.config.json` written before this field existed keeps auto-connecting exactly as before. Set to `false` to keep an instance registered but disconnected until something explicitly connects it (see [multi-instance.md](multi-instance.md#botmanager-instance-lifecycle) and [web.md](web.md#bots-page-instance-management)). This file-level default is separate from the `/bots` **form's** default, which is unchecked for a newly *created* instance regardless of this field — see [web.md](web.md#bots-page-instance-management) |
 
 The whole file is validated at startup — a missing/malformed field, an invalid `id`, or a duplicate `id` across instances fails fast with a specific error rather than starting with bad state. `BOTS_CONFIG_PATH` (in `.env`) can override the config file's location; it defaults to `./bots.config.json`.
 
@@ -53,8 +54,8 @@ cannot do.
 
 ## Auth modes
 
-* **`microsoft`** — On first connect, mineflayer prints a device-login code and URL (via the `onMsaCode` handler in [src/core/bot.ts](../src/core/bot.ts)), tagged with the instance's `id` so simultaneous logins from multiple instances stay distinguishable. Open the link, enter the code, and sign in with the Microsoft account that owns the Minecraft account. The resulting tokens are cached under `auth_cache/<id>/` (`profilesFolder` in the instance config) so you don't have to log in again on every restart.
-* **`offline`** — For servers running in offline/cracked mode. No login flow; `username` is used directly as the bot's identity.
+* **`microsoft`** — Signing in no longer requires a connection attempt: the `/bots` page's **Authenticate** button runs the device-code flow standalone, independent of `host`/`port` (see [multi-instance.md](multi-instance.md#microsoft-authentication) for the full flow and how it relates to `connect()`). Connecting a `microsoft` instance that has no cached token yet still triggers the same device-code flow inline (via mineflayer's own `onMsaCode` handler in [src/core/bot.ts](../src/core/bot.ts)), tagged with the instance's `id`. Either way, open the link, enter the code, and sign in with the Microsoft account that owns the Minecraft account. The resulting tokens are cached under `auth_cache/<id>/` (`profilesFolder` in the instance config, keyed internally by `msaCacheKey`) so you don't have to log in again on every restart or every time `host`/`port` changes.
+* **`offline`** — For servers running in offline/cracked mode. No login flow, no Microsoft controls on `/bots` at all; `username` is used directly as the bot's identity.
 
 ### `auth_cache/`
 

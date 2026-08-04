@@ -22,6 +22,28 @@ export interface BotInstanceError {
   at: number
 }
 
+/**
+ * 'unknown'         -- process just (re)started; no successful check or login has happened yet in this run
+ * 'unauthenticated' -- explicitly not authenticated (never signed in, or cancelled)
+ * 'authenticating'  -- a device-code flow is in progress, via authenticate() or a connect() attempt
+ * 'authenticated'    -- a successful authenticate() or a successful login confirmed a usable token
+ * 'auth_error'       -- the last authenticate() attempt failed
+ *
+ * A cached token file existing on disk does NOT by itself prove 'authenticated' --
+ * only a successful check (authenticate()) or connection does, since a cached
+ * token can be expired or revoked. undefined for 'offline' auth, where none of
+ * this applies.
+ */
+export type MicrosoftAuthStatus = 'unknown' | 'unauthenticated' | 'authenticating' | 'authenticated' | 'auth_error'
+
+/** The link and code to show the user during an in-progress authenticate() -- see docs/web.md. */
+export interface MicrosoftDeviceCode {
+  userCode: string
+  verificationUri: string
+  /** Human-readable instructions, already including the code and URL. */
+  message: string
+}
+
 export interface BotInstancePosition {
   x: number
   y: number
@@ -39,8 +61,9 @@ export interface BotInstanceSnapshot {
   status: BotInstanceStatus
   lastError: BotInstanceError | undefined
 
-  host: string
-  port: number
+  /** Both undefined means this instance is "unconfigured" -- see IBotConfig. */
+  host: string | undefined
+  port: number | undefined
   username: string
 
   /** ms since the current connection's login, or undefined when not online. */
@@ -52,6 +75,14 @@ export interface BotInstanceSnapshot {
   /** Friendly dimension name ('overworld' | 'nether' | 'end'), or undefined when not online. */
   dimension: string | undefined
   activeTask: ActiveTaskInfo | undefined
+
+  /** undefined for 'offline' auth, where none of this applies. */
+  authStatus: MicrosoftAuthStatus | undefined
+  authError: BotInstanceError | undefined
+  /** The account's real Minecraft name, learned from a successful authenticate() or login -- undefined until then. */
+  minecraftProfileName: string | undefined
+  /** Set only while authStatus is 'authenticating' and a device code has actually been issued (a valid cached token skips this entirely). */
+  deviceCode: MicrosoftDeviceCode | undefined
 }
 
 /**
@@ -70,8 +101,26 @@ export interface IBotInstanceHandle {
   getStatus(): BotInstanceStatus
   getLastError(): BotInstanceError | undefined
   getSnapshot(): BotInstanceSnapshot
+  getAuthStatus(): MicrosoftAuthStatus | undefined
+  getAuthError(): BotInstanceError | undefined
+  getMinecraftProfileName(): string | undefined
+  getDeviceCode(): MicrosoftDeviceCode | undefined
   /** Starts (or resumes) connecting. Rejects if already connecting/online/reconnecting. */
   connect(): Promise<void>
   /** Cleanly disconnects and stops auto-reconnecting until connect() is called again. Rejects if already disconnected/errored. */
   disconnect(reason?: string): Promise<void>
+  /**
+   * Standalone Microsoft device-code sign-in, independent of connecting to any
+   * server -- see docs/multi-instance.md#microsoft-authentication. Rejects for
+   * 'offline' auth, if already authenticating, or while the instance is
+   * connecting/online/reconnecting (disconnect first).
+   */
+  authenticate(): Promise<void>
+  /**
+   * Stops waiting on an in-flight authenticate() and returns authStatus to
+   * 'unauthenticated' immediately. Best-effort: the underlying device-code
+   * poll may continue briefly in the background, but its result is discarded
+   * once superseded. Rejects if not currently authenticating.
+   */
+  cancelAuthentication(): Promise<void>
 }

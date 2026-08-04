@@ -185,32 +185,65 @@ visible on the next load or manual retry. Adding SSE here later, matching the
 Dashboard's pattern, is a natural follow-up if that gap matters in practice.
 
 **List columns**: `id`, status (including `disconnected`, styled distinctly
-from the other four statuses), `host:port`, `username`, `auth`, and
-`autoConnect`. A truncated, already-redacted `lastError` is shown under the
-`id` when present, with the full (still redacted) message in a tooltip. The
-page has its own loading, empty, and load-error states (with a retry button),
-independent of Dashboard/Logs.
+from the other four statuses, and **Unconfigured** — a purely computed label
+for an instance with no `host`, not a real connection status; see
+[multi-instance.md](multi-instance.md#microsoft-authentication)), `host:port`
+(or "Not configured"), `username`, `auth` (plus, for `microsoft` instances, a
+sign-in status badge and the real Minecraft profile name once known), and
+`autoConnect`. A truncated, already-redacted `lastError` (and, separately,
+`authError`) is shown under the relevant cell when present, with the full
+message in a tooltip. The page has its own loading, empty, and load-error
+states (with a retry button), independent of Dashboard/Logs.
 
 **Add / Edit** open the same dialog, populated from the current row when
-editing. All of `IBotConfig`'s fields are editable: `id`, `host`, `port`,
-`username`, `auth`, `commandPrefix`, `admins` (comma-separated in the UI,
-split and normalized by `normalizeAdminList` on the server exactly like
-`bots.config.json`), `profilesFolder`, and `autoConnect`. **`id` cannot be
-changed** — the field is disabled while editing, and the server rejects a
-body whose `id` disagrees with the URL's `:id` with `400` before validation
-even runs (see [routes/bots.ts](../src/web/routes/bots.ts)). Changing `auth`
-between `microsoft` and `offline` shows a non-blocking inline warning: the
-existing `auth_cache/<id>/` tokens are not deleted and may be orphaned or
-need a fresh device-code login.
+editing. `host` and `port` are optional — leaving both blank creates an
+"unconfigured" instance (see below); `port` defaults to `25565` server-side
+when a host is given without one. For `auth: microsoft`, the `username` field
+is hidden entirely (the real identity comes from sign-in; the server defaults
+it to `id`); `commandPrefix`, `admins` (comma-separated, split and normalized
+by `normalizeAdminList` exactly like `bots.config.json`), `profilesFolder`,
+and the internal `msaCacheKey` live under a collapsed **Advanced settings**
+section. **`id` cannot be changed** — the field is disabled while editing,
+and the server rejects a body whose `id` disagrees with the URL's `:id` with
+`400` before validation even runs (see
+[routes/bots.ts](../src/web/routes/bots.ts)). **`msaCacheKey` cannot be
+changed either** once an instance exists — its field is disabled while
+editing and the form always resends the loaded value unchanged, since
+changing it would force a fresh sign-in (see
+[multi-instance.md](multi-instance.md#microsoft-authentication)). Changing
+`auth` between `microsoft` and `offline` shows a non-blocking inline warning:
+the existing `auth_cache/<id>/` tokens are not deleted and may be orphaned or
+need a fresh device-code login. **`autoConnect` defaults to unchecked when
+adding a new instance** — a freshly created instance won't attempt to connect
+until its host and sign-in have been verified — but editing an existing
+instance always shows its actual current value; this form default is
+independent of `bots.config.json`'s own field-level default of `true` for a
+config that predates the field (see [configuration.md](configuration.md)).
 
 **Connect / Disconnect / Restart** buttons are enabled based on the row's
-current status: Connect is disabled while already connecting/online/
-reconnecting, Disconnect is disabled while already disconnected/errored, and
-Restart is always enabled (it works from any status, including `errored`).
-Every action button for a row is disabled for the duration of any request
-already in flight for that instance — including a second click on the same
-button — so a double-click can never send the same request twice or race two
-different actions against each other.
+current status: Connect is disabled (with a title explaining why) while
+already connecting/online/reconnecting, while unconfigured, or while
+authentication is in progress; Disconnect is disabled while already
+disconnected/errored; Restart is always enabled (it works from any status,
+including `errored`). Every action button for a row is disabled for the
+duration of any request already in flight for that instance — including a
+second click on the same button — so a double-click can never send the same
+request twice or race two different actions against each other.
+
+**Authenticate / Cancel** appear only for `auth: microsoft` instances —
+offline instances show no Microsoft-related control at all. Clicking
+**Authenticate** opens a dedicated dialog and starts the standalone sign-in
+flow (see [multi-instance.md](multi-instance.md#microsoft-authentication));
+while it's in progress, the row's button becomes **Cancel authentication**
+(so it can be stopped even if the dialog was closed), and Connect is disabled
+for that row. The dialog shows the device code and sign-in link directly in
+the page — not just in the console/logs — and polls `GET /api/bots` every
+1.5s while open so it reflects the code appearing, a fast success via an
+already-valid cached token, or a failure, without the user needing to keep
+the dialog open at all (the row itself stays live too). Polling stops the
+moment a terminal state is reached, the dialog closes for any reason
+(Cancel, Done, the close button, or Escape), or the target instance
+disappears from the list.
 
 **Delete** opens a confirm dialog naming the instance and stating plainly
 that its `data/`, `logs/`, and `auth_cache/` directories are **not** deleted
@@ -252,12 +285,15 @@ All endpoints below except login require the session cookie:
 | `POST /api/bots/:id/connect` | `200` with the updated `BotSummary`, `404` if unknown, `409` if already connecting/online/reconnecting. |
 | `POST /api/bots/:id/disconnect` | `200` with the updated `BotSummary`, `404` if unknown, `409` if already disconnected/errored. |
 | `POST /api/bots/:id/restart` | Disconnects first only if active, then connects; works from any status. `200` with the updated `BotSummary`, `404` if unknown. |
+| `POST /api/bots/:id/authenticate` | Starts (or reports the already-in-progress state of) standalone Microsoft sign-in. Does **not** wait for the full flow to complete — it can take minutes — only long enough to distinguish an immediate rejection from genuinely starting; the client polls `GET /api/bots` for `authStatus`/`deviceCode`/`minecraftProfileName` as it progresses. `200` with the current `BotSummary`, `404` if unknown, `409` if not a `microsoft` instance, already authenticating, or currently connecting/online/reconnecting. |
+| `DELETE /api/bots/:id/authenticate` | Cancels an in-progress authentication; returns `authStatus` to `unauthenticated` immediately. `200` with the updated `BotSummary`, `404` if unknown, `409` if nothing is authenticating. |
 
 Dashboard's and the log viewer's routes receive read-only snapshots and
 `LogStore` access and never receive a Mineflayer `Bot` or `IBotContext`. The
 `/bots` routes are the only ones that can change instance state, and they do
 so exclusively through `BotManager`'s `addInstance`/`removeInstance`/
-`updateInstance`/`connectInstance`/`disconnectInstance`/`restartInstance` —
+`updateInstance`/`connectInstance`/`disconnectInstance`/`restartInstance`/
+`authenticateInstance`/`cancelAuthentication` —
 never a raw handle, never mineflayer directly (see
 [src/web/routes/bots.ts](../src/web/routes/bots.ts)).
 
@@ -289,8 +325,8 @@ password is not removed accidentally.
    SSE view follows only the selected instance.
 8. Exercise multi-level/category filtering, text search, row multi-selection,
    copy-selected, and copy-last-N. Repeat at a narrow/mobile viewport and, on a
-   trusted LAN, from another device using the host's LAN address. Check RTL,
-   light/dark color schemes, and reduced-motion mode on both pages.
+   trusted LAN, from another device using the host's LAN address. Check
+   light/dark color schemes and reduced-motion mode on both pages.
 9. Disconnect and reconnect the dashboard stream, then expire/logout its
    session. Confirm live updates resume cleanly and expiry returns to login.
 10. Run the automated injected-clock rotation test, or keep a test instance
@@ -335,3 +371,71 @@ password is not removed accidentally.
    all three pages.
 
 The automated equivalents run with `npx vitest run`; see [testing.md](testing.md).
+
+### Live smoke checklist: Microsoft authentication
+
+The items above are exercised entirely with fake handles and a fake
+`authenticateMicrosoft()` in the automated tests (`tests/core/bot.test.ts`,
+`tests/web/bots.test.ts`) — deliberately, since a real device-code flow needs
+an actual Microsoft account completing a real browser sign-in and can't be
+automated. The following requires a real Minecraft-owning Microsoft account
+and must be run manually against a real deployment:
+
+1. Create a new `microsoft` instance from `/bots` with `host`, `port`, and
+   `username` all left blank.
+2. Confirm it appears in the list as **Unconfigured**, with no server shown.
+3. Click **Authenticate** once. Confirm exactly one device code and link
+   appear in the dialog (not two, not a fresh one on a re-render/poll tick).
+4. Complete sign-in in a browser using that code. Confirm the dialog (and,
+   after it closes, the row) shows the real Minecraft profile name, not the
+   auto-generated placeholder username.
+5. Confirm no second device code is requested after success — the dialog and
+   row settle into `authenticated` and stay there.
+6. Edit the instance to add a `host` (and, optionally, a `port` — leave it
+   blank once to confirm the `25565` default) and save.
+7. Click **Connect**. Confirm it logs in using the existing cache — no device
+   code, no new sign-in prompt of any kind.
+8. Edit `host` or `port` again (a different value) and confirm re-connecting
+   still requires no re-authentication.
+9. Restart the process (or `docker compose restart`). Confirm `authStatus`
+   starts at `unknown` (not `unauthenticated`, not silently `authenticated`),
+   and that connecting still succeeds off the existing cache without a new
+   sign-in — `unknown` must not mean "cache lost".
+10. Start authenticating a *different* instance and click **Cancel** (from
+    the dialog, and separately, in another run, from the row's Cancel
+    button after closing the dialog first) before completing sign-in.
+    Confirm `authStatus` returns to `unauthenticated` immediately in the UI.
+11. For the cancelled attempt in the previous step, finish the sign-in in the
+    browser tab anyway (the code is likely still technically valid for a
+    while). Confirm the instance's `authStatus` is *not* retroactively
+    updated to `authenticated` by that late completion.
+12. Let a device code expire without completing sign-in (or use an
+    intentionally stale/reused code). Confirm `authStatus` becomes
+    `auth_error` with a clear message, and that clicking **Authenticate**
+    again afterward starts a fresh attempt normally.
+13. Confirm an `offline` instance's row shows no Authenticate/Cancel control
+    at all, in any state.
+14. Point a `microsoft` (or `offline`) instance at a server whose protocol
+    version isn't supported by the installed mineflayer, connect, and
+    confirm the instance goes to `errored` with a clear message and does
+    **not** enter a reconnect loop (watch the console — no repeating
+    "Reconnecting in…" lines, and for `microsoft` auth, no repeated device
+    codes).
+15. Point an instance at a host that's simply unreachable (wrong port, or
+    briefly stop the target server) and confirm the existing
+    capped-exponential-backoff reconnect loop still runs normally — this
+    class of failure must remain unaffected by the fatal-error handling
+    exercised in the previous step.
+
+While running the above, also confirm two implementation details that are
+easy to get wrong and hard to catch any other way:
+
+* `deviceCode` disappears from `GET /api/bots`'s response the moment
+  `authStatus` leaves `authenticating` — after success, cancellation,
+  failure, or expiry — and never appears in `bots.config.json` (open the
+  file directly; it isn't part of `IBotConfig` at all).
+* The dialog's polling actually stops: watch the Network tab while the
+  dialog is open, confirm the repeating `GET /api/bots` requests stop the
+  moment the dialog closes (Cancel, Done, ✕, or Escape) or a terminal state
+  is reached — no lingering `setInterval` still polling in the background
+  after the dialog is gone.

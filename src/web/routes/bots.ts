@@ -9,7 +9,13 @@ import type { IncomingMessage } from 'node:http'
 import { validateInstance } from '../../config/instances'
 import { BotInstanceConflictError, BotInstanceNotFoundError } from '../../core/bot-errors'
 import type { LogStore } from '../../core/log-store'
-import type { BotInstanceError, BotInstanceStatus, IBotInstanceHandle } from '../../interfaces/bot-instance'
+import type {
+  BotInstanceError,
+  BotInstanceStatus,
+  IBotInstanceHandle,
+  MicrosoftAuthStatus,
+  MicrosoftDeviceCode
+} from '../../interfaces/bot-instance'
 import type { IBotConfig } from '../../interfaces/config'
 import { redactText } from '../../utils/redaction'
 import { HttpError, readJsonBody, type Router, sendJson, sendNoContent } from '../router'
@@ -20,20 +26,29 @@ import type { BotInstanceRegistry } from './logs'
  * deliberately just IBotConfig's own (non-secret) fields plus live status.
  * No auth_cache paths are resolved or read here, and no field on IBotConfig
  * ever holds a token or credential -- auth is only ever the mode string
- * 'microsoft' | 'offline'.
+ * 'microsoft' | 'offline'. `msaCacheKey` is exposed so the edit form can send
+ * the exact existing value straight back unchanged (see PUT below) -- it's
+ * an opaque internal identity, never a secret.
  */
 export interface BotSummary {
   id: string
-  host: string
-  port: number
+  /** Both undefined means this instance is "unconfigured" -- see IBotConfig. */
+  host: string | undefined
+  port: number | undefined
   username: string
   auth: 'microsoft' | 'offline'
   commandPrefix: string
   admins: string[]
   profilesFolder: string | undefined
+  msaCacheKey: string
   autoConnect: boolean
   status: BotInstanceStatus
   lastError: BotInstanceError | undefined
+  /** undefined for 'offline' auth. */
+  authStatus: MicrosoftAuthStatus | undefined
+  authError: BotInstanceError | undefined
+  minecraftProfileName: string | undefined
+  deviceCode: MicrosoftDeviceCode | undefined
 }
 
 export interface BotManagementRegistry extends BotInstanceRegistry {
@@ -43,6 +58,8 @@ export interface BotManagementRegistry extends BotInstanceRegistry {
   connectInstance(id: string): Promise<void>
   disconnectInstance(id: string, reason?: string): Promise<void>
   restartInstance(id: string): Promise<void>
+  authenticateInstance(id: string): Promise<void>
+  cancelAuthentication(id: string): Promise<void>
 }
 
 export interface BotRoutesOptions {
@@ -105,6 +122,31 @@ export function registerBotRoutes(router: Router, options: BotRoutesOptions): vo
     await runManaged(() => options.manager.restartInstance(params.id))
     sendJson(response, 200, summarize(mustGetInstance(options.manager, params.id)))
   })
+
+  router.post('/api/bots/:id/authenticate', async ({ response, params }) => {
+    // authenticateInstance() can legitimately run for minutes (it waits on
+    // the user), so unlike the routes above this one deliberately does NOT
+    // await it fully -- doing so would hold the HTTP request open the whole
+    // time. Its guard checks (already authenticating, not a 'microsoft'
+    // instance, currently connecting/online/reconnecting, unknown id) run
+    // synchronously inside BotInstance.authenticate() itself and reject
+    // almost instantly -- far faster than any real network round-trip to
+    // Microsoft could ever complete -- so draining the microtask queue once
+    // reliably tells "rejected before doing any real work" apart from
+    // "genuinely under way". A response that lands here because the whole
+    // thing raced to completion via an already-valid cached token is also
+    // handled correctly: summarize() below just reports whatever the
+    // instance's current (by then final) state already is.
+    const authenticating = options.manager.authenticateInstance(params.id)
+    const outcome = await fastSettle(authenticating)
+    if (outcome.settled && outcome.error !== undefined) throw toHttpError(outcome.error)
+    sendJson(response, 200, summarize(mustGetInstance(options.manager, params.id)))
+  })
+
+  router.add('DELETE', '/api/bots/:id/authenticate', async ({ response, params }) => {
+    await runManaged(() => options.manager.cancelAuthentication(params.id))
+    sendJson(response, 200, summarize(mustGetInstance(options.manager, params.id)))
+  })
 }
 
 /**
@@ -142,10 +184,43 @@ async function runManaged<T>(work: () => Promise<T>): Promise<T> {
   try {
     return await work()
   } catch (err) {
-    if (err instanceof BotInstanceNotFoundError) throw new HttpError(404, err.message)
-    if (err instanceof BotInstanceConflictError) throw new HttpError(409, err.message)
-    throw err
+    throw toHttpError(err)
   }
+}
+
+function toHttpError(err: unknown): unknown {
+  if (err instanceof BotInstanceNotFoundError) return new HttpError(404, err.message)
+  if (err instanceof BotInstanceConflictError) return new HttpError(409, err.message)
+  return err
+}
+
+interface FastSettleResult {
+  settled: boolean
+  error?: unknown
+}
+
+/**
+ * Resolves once every microtask already queued at the time of the call has
+ * run (via setImmediate, a full macrotask boundary), reporting whether
+ * `promise` settled within that window. Real async I/O (a network call,
+ * reading a file) can never complete inside a pure microtask flush, so a
+ * `promise` that settles here did so for purely synchronous/in-memory
+ * reasons -- exactly the guard-check case this exists to detect.
+ */
+function fastSettle(promise: Promise<unknown>): Promise<FastSettleResult> {
+  const result: FastSettleResult = { settled: false }
+  promise.then(
+    () => {
+      result.settled = true
+    },
+    (err: unknown) => {
+      result.settled = true
+      result.error = err
+    }
+  )
+  return new Promise((resolve) => {
+    setImmediate(() => resolve({ ...result }))
+  })
 }
 
 function mustGetInstance(manager: BotInstanceRegistry, id: string): IBotInstanceHandle {
@@ -157,6 +232,7 @@ function mustGetInstance(manager: BotInstanceRegistry, id: string): IBotInstance
 function summarize(handle: IBotInstanceHandle): BotSummary {
   const config = handle.config
   const lastError = handle.getLastError()
+  const authError = handle.getAuthError()
 
   return {
     id: config.id,
@@ -167,9 +243,14 @@ function summarize(handle: IBotInstanceHandle): BotSummary {
     commandPrefix: config.commandPrefix,
     admins: [...config.admins],
     profilesFolder: config.profilesFolder,
+    msaCacheKey: config.msaCacheKey,
     autoConnect: config.autoConnect,
     status: handle.getStatus(),
-    lastError: lastError ? { ...lastError, message: redactText(lastError.message) } : undefined
+    lastError: lastError ? { ...lastError, message: redactText(lastError.message) } : undefined,
+    authStatus: handle.getAuthStatus(),
+    authError: authError ? { ...authError, message: redactText(authError.message) } : undefined,
+    minecraftProfileName: handle.getMinecraftProfileName(),
+    deviceCode: handle.getDeviceCode()
   }
 }
 

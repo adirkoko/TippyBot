@@ -28,7 +28,12 @@
       ['path', { d: 'm14.5 5.5 4 4M4 20l4.5-1 10-10a2.1 2.1 0 0 0-3-3l-10 10Z' }],
       ['path', { d: 'm13.5 7.5 3 3' }]
     ],
-    trash: [['path', { d: 'M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5' }]]
+    trash: [['path', { d: 'M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5' }]],
+    key: [
+      ['rect', { x: '5', y: '11', width: '14', height: '9', rx: '2' }],
+      ['path', { d: 'M8 11V8a4 4 0 0 1 8 0v3' }]
+    ],
+    cancel: [['path', { d: 'm7 7 10 10M17 7 7 17' }]]
   }
 
   setupTheme()
@@ -785,12 +790,15 @@
       formId: byId('bot-form-id'),
       formHost: byId('bot-form-host'),
       formPort: byId('bot-form-port'),
+      formUsernameField: byId('bot-form-username-field'),
       formUsername: byId('bot-form-username'),
       formAuth: byId('bot-form-auth'),
       formAuthWarning: byId('bot-form-auth-warning'),
       formPrefix: byId('bot-form-prefix'),
       formAdmins: byId('bot-form-admins'),
       formProfiles: byId('bot-form-profiles'),
+      formCacheKeyField: byId('bot-form-cache-key-field'),
+      formCacheKey: byId('bot-form-cache-key'),
       formAutoConnect: byId('bot-form-auto-connect'),
       formCancel: byId('bot-form-cancel'),
       formSubmit: byId('bot-form-submit'),
@@ -798,7 +806,19 @@
       deleteDialogId: byId('delete-dialog-id'),
       deleteClose: byId('delete-dialog-close'),
       deleteCancel: byId('delete-dialog-cancel'),
-      deleteConfirm: byId('delete-dialog-confirm')
+      deleteConfirm: byId('delete-dialog-confirm'),
+      authDialog: byId('auth-dialog'),
+      authDialogId: byId('auth-dialog-id'),
+      authDialogClose: byId('auth-dialog-close'),
+      authDialogStatus: byId('auth-dialog-status'),
+      authDialogCodePanel: byId('auth-dialog-code-panel'),
+      authDialogCode: byId('auth-dialog-code'),
+      authDialogLink: byId('auth-dialog-link'),
+      authDialogError: byId('auth-dialog-error'),
+      authDialogSuccess: byId('auth-dialog-success'),
+      authDialogProfile: byId('auth-dialog-profile'),
+      authDialogCancel: byId('auth-dialog-cancel'),
+      authDialogDone: byId('auth-dialog-done')
     }
 
     const state = {
@@ -808,7 +828,10 @@
       deleteTargetId: undefined,
       formSubmitting: false,
       deleteSubmitting: false,
-      toastTimer: undefined
+      toastTimer: undefined,
+      authTargetId: undefined,
+      authPollTimer: undefined,
+      authActionPending: false
     }
 
     setupLogoutButton(elements.logout)
@@ -817,10 +840,17 @@
     elements.formClose.addEventListener('click', () => elements.formDialog.close())
     elements.formCancel.addEventListener('click', () => elements.formDialog.close())
     elements.form.addEventListener('submit', (event) => void handleFormSubmit(event))
-    elements.formAuth.addEventListener('change', updateAuthWarning)
+    elements.formAuth.addEventListener('change', () => {
+      updateAuthWarning()
+      updateAuthFieldVisibility()
+    })
     elements.deleteClose.addEventListener('click', () => elements.deleteDialog.close())
     elements.deleteCancel.addEventListener('click', () => elements.deleteDialog.close())
     elements.deleteConfirm.addEventListener('click', () => void handleDeleteConfirm())
+    elements.authDialogClose.addEventListener('click', () => elements.authDialog.close())
+    elements.authDialogCancel.addEventListener('click', () => void handleAuthCancel())
+    elements.authDialogDone.addEventListener('click', () => elements.authDialog.close())
+    elements.authDialog.addEventListener('close', onAuthDialogClosed)
 
     void loadBots()
 
@@ -877,26 +907,46 @@
 
     function createBotRow(instance) {
       const status = normalizedStatus(instance.status)
+      const unconfigured = !instance.host
+      const authenticating = instance.authStatus === 'authenticating'
       const busy = state.pendingIds.has(instance.id)
       const row = document.createElement('tr')
-      row.className = `bots-row status-${status}`
+      row.className = `bots-row status-${unconfigured ? 'unconfigured' : status}`
 
       const idCell = document.createElement('td')
       idCell.append(span('bots-id', instance.id))
       if (isLastError(instance.lastError)) idCell.append(createErrorNote(instance.lastError))
 
       const statusCell = document.createElement('td')
-      statusCell.append(span(`status-badge status-${status}`, statusLabel(status)))
+      statusCell.append(
+        unconfigured
+          ? span('status-badge status-unconfigured', 'Unconfigured')
+          : span(`status-badge status-${status}`, statusLabel(status))
+      )
 
       const serverCell = document.createElement('td')
       serverCell.dir = 'ltr'
-      serverCell.textContent = formatEndpoint(instance.host, instance.port)
+      if (unconfigured) {
+        serverCell.append(span('muted-line', 'Not configured'))
+      } else {
+        serverCell.textContent = formatEndpoint(instance.host, instance.port)
+      }
 
       const usernameCell = document.createElement('td')
       usernameCell.textContent = instance.username
 
       const authCell = document.createElement('td')
-      authCell.textContent = instance.auth === 'microsoft' ? 'Microsoft' : 'Offline'
+      authCell.append(span('auth-mode', instance.auth === 'microsoft' ? 'Microsoft' : 'Offline'))
+      if (instance.auth === 'microsoft') {
+        authCell.append(span(`auth-status-badge auth-status-${instance.authStatus || 'unknown'}`, authStatusLabel(instance.authStatus)))
+        if (instance.minecraftProfileName) {
+          const profileLine = document.createElement('p')
+          profileLine.className = 'muted-line'
+          profileLine.textContent = `as ${instance.minecraftProfileName}`
+          authCell.append(profileLine)
+        }
+        if (isLastError(instance.authError)) authCell.append(createErrorNote(instance.authError))
+      }
 
       const autoConnectCell = document.createElement('td')
       autoConnectCell.append(
@@ -906,11 +956,32 @@
       const actionsCell = document.createElement('td')
       actionsCell.className = 'bots-actions'
       const isActive = ACTIVE_STATUSES.includes(status)
+      const connectBlockedReason = unconfigured
+        ? 'No host configured yet -- edit this instance to add one.'
+        : authenticating
+          ? 'Authentication is in progress -- finish or cancel it first.'
+          : undefined
 
       actionsCell.append(
-        actionButton('Connect', 'play', busy || isActive, () => runInstanceAction(instance.id, 'connect')),
+        actionButton(
+          'Connect',
+          'play',
+          busy || isActive || Boolean(connectBlockedReason),
+          () => runInstanceAction(instance.id, 'connect'),
+          undefined,
+          connectBlockedReason
+        ),
         actionButton('Disconnect', 'stop', busy || !isActive, () => runInstanceAction(instance.id, 'disconnect')),
-        actionButton('Restart', 'restart', busy, () => runInstanceAction(instance.id, 'restart')),
+        actionButton('Restart', 'restart', busy || authenticating, () => runInstanceAction(instance.id, 'restart'))
+      )
+      if (instance.auth === 'microsoft') {
+        actionsCell.append(
+          authenticating
+            ? actionButton('Cancel authentication', 'cancel', busy, () => void handleCancelFromRow(instance.id), 'danger')
+            : actionButton('Authenticate Microsoft', 'key', busy || isActive, () => openAuthDialog(instance))
+        )
+      }
+      actionsCell.append(
         actionButton('Edit', 'edit', busy, () => openFormDialog(instance)),
         actionButton('Delete', 'trash', busy, () => openDeleteDialog(instance), 'danger')
       )
@@ -919,12 +990,23 @@
       return row
     }
 
-    function actionButton(label, iconName, disabled, onClick, kind) {
+    function authStatusLabel(authStatus) {
+      const labels = {
+        unknown: 'Not verified yet',
+        unauthenticated: 'Not authenticated',
+        authenticating: 'Authenticating…',
+        authenticated: 'Authenticated',
+        auth_error: 'Auth error'
+      }
+      return labels[authStatus] || 'Not verified yet'
+    }
+
+    function actionButton(label, iconName, disabled, onClick, kind, title) {
       const button = document.createElement('button')
       button.type = 'button'
       button.className = `icon-button table-action${kind === 'danger' ? ' is-danger' : ''}`
       button.setAttribute('aria-label', label)
-      button.title = label
+      button.title = title || label
       button.append(createIcon(iconName))
       button.disabled = disabled
       button.addEventListener('click', onClick)
@@ -962,6 +1044,173 @@
       }
     }
 
+    // ---- Microsoft authentication ----
+
+    async function openAuthDialog(instance) {
+      // Guards a rapid double-click on the row's Authenticate button: a
+      // second showModal() on an already-open <dialog> throws.
+      if (elements.authDialog.open) return
+      state.authTargetId = instance.id
+      elements.authDialogId.textContent = instance.id
+      elements.authDialogStatus.hidden = false
+      elements.authDialogStatus.textContent = 'Requesting a sign-in code…'
+      elements.authDialogCodePanel.hidden = true
+      elements.authDialogError.hidden = true
+      elements.authDialogError.textContent = ''
+      elements.authDialogSuccess.hidden = true
+      elements.authDialogDone.hidden = true
+      elements.authDialogCancel.hidden = false
+      elements.authDialogCancel.disabled = false
+
+      elements.authDialog.showModal()
+
+      try {
+        const response = await apiFetch(`/api/bots/${encodeURIComponent(instance.id)}/authenticate`, {
+          method: 'POST'
+        })
+        const body = await parseJson(response)
+        if (!response.ok) throw new Error(describeApiError(body, response.status))
+        applyAuthDialogState(body)
+        if (body.authStatus === 'authenticating') startAuthPolling(instance.id)
+      } catch (error) {
+        if (isAuthRedirect(error)) return
+        showAuthDialogError(error.message || 'Failed to start authentication.')
+      } finally {
+        await loadBots()
+      }
+    }
+
+    function applyAuthDialogState(summary) {
+      if (summary.authStatus === 'authenticating') {
+        elements.authDialogStatus.hidden = false
+        elements.authDialogStatus.textContent = summary.deviceCode
+          ? 'Waiting for you to complete sign-in…'
+          : 'Requesting a sign-in code…'
+        elements.authDialogCodePanel.hidden = !summary.deviceCode
+        if (summary.deviceCode) {
+          elements.authDialogCode.textContent = summary.deviceCode.userCode
+          elements.authDialogLink.href = summary.deviceCode.verificationUri
+          elements.authDialogLink.textContent = summary.deviceCode.verificationUri.replace(/^https?:\/\//, '')
+        }
+        elements.authDialogError.hidden = true
+        elements.authDialogSuccess.hidden = true
+        elements.authDialogDone.hidden = true
+        elements.authDialogCancel.hidden = false
+      } else if (summary.authStatus === 'authenticated') {
+        stopAuthPolling()
+        elements.authDialogStatus.hidden = true
+        elements.authDialogCodePanel.hidden = true
+        elements.authDialogError.hidden = true
+        elements.authDialogSuccess.hidden = false
+        elements.authDialogProfile.textContent = summary.minecraftProfileName || ''
+        elements.authDialogCancel.hidden = true
+        elements.authDialogDone.hidden = false
+        elements.authDialogDone.focus()
+      } else if (summary.authStatus === 'auth_error') {
+        stopAuthPolling()
+        showAuthDialogError((summary.authError && summary.authError.message) || 'Authentication failed.')
+      } else {
+        // 'unauthenticated' or 'unknown' -- e.g. cancelled from another tab.
+        stopAuthPolling()
+        elements.authDialogStatus.hidden = false
+        elements.authDialogStatus.textContent = 'Authentication was cancelled.'
+        elements.authDialogCodePanel.hidden = true
+        elements.authDialogCancel.hidden = true
+        elements.authDialogDone.hidden = false
+      }
+    }
+
+    function showAuthDialogError(message) {
+      elements.authDialogStatus.hidden = true
+      elements.authDialogCodePanel.hidden = true
+      elements.authDialogSuccess.hidden = true
+      elements.authDialogError.hidden = false
+      elements.authDialogError.textContent = message
+      elements.authDialogDone.hidden = false
+      elements.authDialogCancel.hidden = true
+    }
+
+    function startAuthPolling(id) {
+      stopAuthPolling()
+      state.authPollTimer = window.setInterval(() => void pollAuthState(id), 1500)
+    }
+
+    function stopAuthPolling() {
+      if (state.authPollTimer) window.clearInterval(state.authPollTimer)
+      state.authPollTimer = undefined
+    }
+
+    function onAuthDialogClosed() {
+      stopAuthPolling()
+      state.authTargetId = undefined
+    }
+
+    async function pollAuthState(id) {
+      if (state.authTargetId !== id) {
+        stopAuthPolling()
+        return
+      }
+      try {
+        const response = await apiFetch('/api/bots')
+        const payload = await parseJson(response)
+        const instances = botInstances(payload)
+        if (!response.ok || !instances) return
+        if (state.instances) renderBots(instances) // keeps the table row live while the dialog is open
+        const match = instances.find((item) => item && item.id === id)
+        if (!match) {
+          stopAuthPolling()
+          return
+        }
+        applyAuthDialogState(match)
+      } catch (error) {
+        if (isAuthRedirect(error)) stopAuthPolling()
+      }
+    }
+
+    async function handleAuthCancel() {
+      const id = state.authTargetId
+      if (!id) {
+        elements.authDialog.close()
+        return
+      }
+      elements.authDialogCancel.disabled = true
+      try {
+        const response = await apiFetch(`/api/bots/${encodeURIComponent(id)}/authenticate`, { method: 'DELETE' })
+        if (!response.ok) {
+          const body = await parseJson(response)
+          throw new Error(describeApiError(body, response.status))
+        }
+      } catch (error) {
+        if (!isAuthRedirect(error)) showToast(error.message || 'Failed to cancel authentication.')
+      } finally {
+        elements.authDialogCancel.disabled = false
+        elements.authDialog.close()
+        await loadBots()
+      }
+    }
+
+    /** Row-level cancel, for when the dialog isn't open (e.g. after a reload while authenticating). */
+    async function handleCancelFromRow(id) {
+      if (state.pendingIds.has(id)) return
+      state.pendingIds.add(id)
+      if (state.instances) renderBots(state.instances)
+
+      try {
+        const response = await apiFetch(`/api/bots/${encodeURIComponent(id)}/authenticate`, { method: 'DELETE' })
+        if (!response.ok) {
+          const body = await parseJson(response)
+          throw new Error(describeApiError(body, response.status))
+        }
+        showToast('Authentication cancelled.')
+      } catch (error) {
+        if (!isAuthRedirect(error)) showToast(error.message || 'Failed to cancel authentication.')
+      } finally {
+        state.pendingIds.delete(id)
+        if (state.authTargetId === id) elements.authDialog.close()
+        await loadBots()
+      }
+    }
+
     // ---- add / edit form ----
 
     function openFormDialog(instance) {
@@ -973,15 +1222,20 @@
       elements.formTitle.textContent = instance ? `Edit instance "${instance.id}"` : 'Add instance'
       elements.formId.value = instance ? instance.id : ''
       elements.formId.disabled = Boolean(instance)
-      elements.formHost.value = instance ? instance.host : ''
-      elements.formPort.value = instance ? String(instance.port) : ''
+      elements.formHost.value = instance && instance.host ? instance.host : ''
+      elements.formPort.value = instance && instance.port ? String(instance.port) : ''
       elements.formUsername.value = instance ? instance.username : ''
-      elements.formAuth.value = instance ? instance.auth : 'offline'
+      elements.formAuth.value = instance ? instance.auth : 'microsoft'
       elements.formPrefix.value = instance ? instance.commandPrefix || '' : ''
       elements.formAdmins.value = instance && Array.isArray(instance.admins) ? instance.admins.join(', ') : ''
       elements.formProfiles.value = instance && instance.profilesFolder ? instance.profilesFolder : ''
-      elements.formAutoConnect.checked = instance ? Boolean(instance.autoConnect) : true
+      elements.formCacheKey.value = instance ? instance.msaCacheKey || '' : ''
+      elements.formCacheKey.disabled = Boolean(instance)
+      // New instances default to off until the connection has been verified;
+      // editing always reflects the instance's actual current value.
+      elements.formAutoConnect.checked = instance ? Boolean(instance.autoConnect) : false
 
+      updateAuthFieldVisibility()
       elements.formDialog.showModal()
       ;(instance ? elements.formHost : elements.formId).focus()
     }
@@ -991,19 +1245,39 @@
       elements.formAuthWarning.hidden = !changed
     }
 
+    function updateAuthFieldVisibility() {
+      const isMicrosoft = elements.formAuth.value === 'microsoft'
+      // Microsoft's real identity comes from sign-in, not a typed username --
+      // and msaCacheKey is an internal detail offline instances don't have.
+      elements.formUsernameField.hidden = isMicrosoft
+      elements.formUsername.required = !isMicrosoft
+      elements.formCacheKeyField.hidden = !isMicrosoft
+    }
+
     async function handleFormSubmit(event) {
       event.preventDefault()
       if (state.formSubmitting) return
 
+      const isMicrosoft = elements.formAuth.value === 'microsoft'
+      const host = elements.formHost.value.trim()
+      const port = elements.formPort.value.trim()
+
       const payload = {
         id: elements.formId.value.trim(),
-        host: elements.formHost.value.trim(),
-        port: Number(elements.formPort.value),
-        username: elements.formUsername.value.trim(),
+        host: host || undefined,
+        port: port ? Number(port) : undefined,
+        // Microsoft's real identity comes from sign-in; an empty value here
+        // lets the server default it to the instance id.
+        username: elements.formUsername.value.trim() || undefined,
         auth: elements.formAuth.value,
         commandPrefix: elements.formPrefix.value.trim() || undefined,
         admins: elements.formAdmins.value.split(',').map((name) => name.trim()).filter(Boolean),
         profilesFolder: elements.formProfiles.value.trim() || undefined,
+        // Sent back exactly as loaded when editing (the field is disabled,
+        // not user-editable, in that case) -- see openFormDialog. Left
+        // undefined for 'offline' or a genuinely blank value on a new
+        // instance, so the server can auto-generate it.
+        msaCacheKey: isMicrosoft ? elements.formCacheKey.value.trim() || undefined : undefined,
         autoConnect: elements.formAutoConnect.checked
       }
 
@@ -1181,8 +1455,9 @@
     return Boolean(value) &&
       typeof value === 'object' &&
       typeof value.id === 'string' &&
-      typeof value.host === 'string' &&
-      Number.isFinite(value.port) &&
+      // Both undefined means "unconfigured" -- see IBotConfig.
+      (value.host === undefined || typeof value.host === 'string') &&
+      (value.port === undefined || Number.isFinite(value.port)) &&
       typeof value.username === 'string' &&
       typeof value.auth === 'string' &&
       typeof value.status === 'string' &&

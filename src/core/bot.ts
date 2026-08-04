@@ -13,7 +13,9 @@ import {
   type BotInstanceError,
   type BotInstanceSnapshot,
   type BotInstanceStatus,
-  type IBotInstanceHandle
+  type IBotInstanceHandle,
+  type MicrosoftAuthStatus,
+  type MicrosoftDeviceCode
 } from '../interfaces/bot-instance'
 
 import { createConsoleLogger } from '../utils/logger'
@@ -29,7 +31,10 @@ import { CooldownService } from './cooldown-service'
 import { HomeService } from './home-service'
 import { JsonHomeStore } from './home-store'
 import { computeReconnectDelay } from './reconnect'
-import { permissionsFilePath, homesFilePath } from '../config/instancePaths'
+import { isFatalConnectionError } from './connection-errors'
+import { MICROSOFT_AUTH_FLOW_OPTIONS } from './microsoft-auth-options'
+import { authenticateMicrosoft as defaultAuthenticateMicrosoft } from './microsoft-auth'
+import { permissionsFilePath, homesFilePath, defaultProfilesFolder } from '../config/instancePaths'
 import { modules } from '../modules/index'
 
 /** How long disconnect() waits for mineflayer's 'end' event before forcing the state anyway. */
@@ -57,14 +62,31 @@ class BotInstance implements IBotInstanceHandle {
   currentBot: Bot | undefined
   reconnectTimer: ReturnType<typeof setTimeout> | undefined
 
+  /** undefined for 'offline' auth -- see MicrosoftAuthStatus. */
+  authStatus: MicrosoftAuthStatus | undefined
+  authError: BotInstanceError | undefined
+  minecraftProfileName: string | undefined
+  deviceCode: MicrosoftDeviceCode | undefined
+  /**
+   * Identity token for the in-flight authenticate() call, if any. The
+   * eventual result only applies if this still matches when it settles --
+   * cancelAuthentication() clears it immediately (see there for why a
+   * bounded wait, not real cancellation, is the right tradeoff here, same
+   * as disconnect()'s DISCONNECT_TIMEOUT_MS fallback below).
+   */
+  private currentAuthAttempt: object | undefined
+
   private operation: Promise<void> = Promise.resolve()
 
   constructor(
     readonly id: string,
     readonly config: IBotConfig,
     private readonly logger: ILogger,
-    private readonly createMineflayerBot: typeof mineflayer.createBot
-  ) {}
+    private readonly createMineflayerBot: typeof mineflayer.createBot,
+    private readonly authenticateMicrosoft: typeof defaultAuthenticateMicrosoft
+  ) {
+    this.authStatus = config.auth === 'microsoft' ? 'unknown' : undefined
+  }
 
   getStatus(): BotInstanceStatus {
     return this.status
@@ -72,6 +94,22 @@ class BotInstance implements IBotInstanceHandle {
 
   getLastError(): BotInstanceError | undefined {
     return this.lastError
+  }
+
+  getAuthStatus(): MicrosoftAuthStatus | undefined {
+    return this.authStatus
+  }
+
+  getAuthError(): BotInstanceError | undefined {
+    return this.authError
+  }
+
+  getMinecraftProfileName(): string | undefined {
+    return this.minecraftProfileName
+  }
+
+  getDeviceCode(): MicrosoftDeviceCode | undefined {
+    return this.deviceCode
   }
 
   getSnapshot(): BotInstanceSnapshot {
@@ -82,16 +120,92 @@ class BotInstance implements IBotInstanceHandle {
       lastError: this.lastError,
       connectedSince: this.connectedSince,
       bot: this.status === 'online' ? this.ctx?.bot : undefined,
-      activeTask: this.ctx?.tasks.getActive()
+      activeTask: this.ctx?.tasks.getActive(),
+      authStatus: this.authStatus,
+      authError: this.authError,
+      minecraftProfileName: this.minecraftProfileName,
+      deviceCode: this.deviceCode
     })
   }
 
   connect(): Promise<void> {
+    // "Unconfigured" instance (see IBotConfig) -- checked before ever
+    // touching mineflayer/runInstance, so an unconfigured instance never
+    // gets a reconnect loop, an 'errored' status, or any other side effect
+    // from an attempt that could only ever fail the same way.
+    if (!this.config.host) {
+      return Promise.reject(
+        new BotInstanceConflictError(`Bot instance "${this.id}" has no host configured yet.`)
+      )
+    }
+    // Checked synchronously, same reasoning as authenticate() below: without
+    // this, a connect() issued while authenticate() is still waiting on the
+    // user would silently queue behind it (possibly for minutes) instead of
+    // being rejected right away.
+    if (this.authStatus === 'authenticating') {
+      return Promise.reject(
+        new BotInstanceConflictError(
+          `Bot instance "${this.id}" is currently authenticating; wait for it to finish or cancel it first.`
+        )
+      )
+    }
     return this.enqueue(() => this.doConnect())
   }
 
   disconnect(reason?: string): Promise<void> {
     return this.enqueue(() => this.doDisconnect(reason))
+  }
+
+  /**
+   * Guards are checked and authStatus flips to 'authenticating' synchronously,
+   * right here -- NOT inside the queued work. authenticateMicrosoft() can
+   * stay pending for as long as the user takes to complete the device code
+   * (unlike doConnect(), whose promise resolves quickly regardless of the
+   * actual network connect), so if this state only changed once the queued
+   * function actually ran, a second authenticate() (or a connect()) issued
+   * before that turn would see stale state and wrongly proceed instead of
+   * being rejected immediately.
+   */
+  authenticate(): Promise<void> {
+    if (this.config.auth !== 'microsoft') {
+      return Promise.reject(
+        new BotInstanceConflictError(`Bot instance "${this.id}" does not use Microsoft authentication.`)
+      )
+    }
+    if (ACTIVE_BOT_STATUSES.includes(this.status)) {
+      return Promise.reject(
+        new BotInstanceConflictError(`Bot instance "${this.id}" is currently ${this.status}; disconnect first.`)
+      )
+    }
+    if (this.authStatus === 'authenticating') {
+      return Promise.reject(new BotInstanceConflictError(`Bot instance "${this.id}" is already authenticating.`))
+    }
+
+    const attempt = {}
+    this.currentAuthAttempt = attempt
+    this.authStatus = 'authenticating'
+    this.authError = undefined
+    this.deviceCode = undefined
+
+    return this.enqueue(() => this.doAuthenticate(attempt))
+  }
+
+  /**
+   * Deliberately NOT queued through `enqueue()`: that chain only runs the
+   * next operation once the current one settles, which is exactly wrong for
+   * "stop waiting on the one that's currently running". This mutates state
+   * directly and immediately instead.
+   */
+  cancelAuthentication(): Promise<void> {
+    if (this.authStatus !== 'authenticating') {
+      return Promise.reject(
+        new BotInstanceConflictError(`Bot instance "${this.id}" is not currently authenticating.`)
+      )
+    }
+    this.currentAuthAttempt = undefined
+    this.authStatus = 'unauthenticated'
+    this.deviceCode = undefined
+    return Promise.resolve()
   }
 
   private enqueue(work: () => Promise<void>): Promise<void> {
@@ -106,6 +220,11 @@ class BotInstance implements IBotInstanceHandle {
   private async doConnect(): Promise<void> {
     if (ACTIVE_BOT_STATUSES.includes(this.status)) {
       throw new BotInstanceConflictError(`Bot instance "${this.id}" is already ${this.status}.`)
+    }
+    if (this.authStatus === 'authenticating') {
+      throw new BotInstanceConflictError(
+        `Bot instance "${this.id}" is currently authenticating; wait for it to finish or cancel it first.`
+      )
     }
 
     this.stopRequested = false
@@ -172,6 +291,48 @@ class BotInstance implements IBotInstanceHandle {
     this.currentBot = undefined
     this.ctx = undefined
   }
+
+  /** Guards already ran and authStatus is already 'authenticating' -- see authenticate() above. `attempt` identifies this specific call for the staleness checks below. */
+  private async doAuthenticate(attempt: object): Promise<void> {
+    // Cancelled (or superseded) while queued behind a connect()/disconnect()
+    // that was already in flight -- skip the network call entirely instead
+    // of spending a device code on an attempt nobody is waiting for anymore.
+    if (this.currentAuthAttempt !== attempt) return
+
+    try {
+      const result = await this.authenticateMicrosoft(
+        this.config.msaCacheKey,
+        this.config.profilesFolder ?? defaultProfilesFolder(this.id),
+        (code) => {
+          // Still logged, for anyone watching the console/log file directly --
+          // but the web UI (see routes/bots.ts) reads this off the instance
+          // instead of parsing logs, so it shows up in the /bots page itself.
+          console.log('================================================')
+          console.log(`TippyBot Microsoft Authentication [${this.id}]`)
+          console.log('Link: https://www.microsoft.com/link')
+          console.log(`Code: ${code.userCode}`)
+          console.log('================================================')
+          if (this.currentAuthAttempt === attempt) this.deviceCode = code
+        }
+      )
+      if (this.currentAuthAttempt !== attempt) return // superseded by cancelAuthentication() or a later attempt
+
+      this.authStatus = 'authenticated'
+      this.minecraftProfileName = result.profileName
+      this.deviceCode = undefined
+      this.logger.info('Microsoft authentication succeeded', { profileName: result.profileName })
+    } catch (err) {
+      if (this.currentAuthAttempt !== attempt) return // superseded -- don't overwrite a newer attempt's outcome
+
+      this.authStatus = 'auth_error'
+      this.authError = { message: err instanceof Error ? err.message : String(err), at: Date.now() }
+      this.deviceCode = undefined
+      this.logger.error('Microsoft authentication failed', { err })
+      throw err
+    } finally {
+      if (this.currentAuthAttempt === attempt) this.currentAuthAttempt = undefined
+    }
+  }
 }
 
 /**
@@ -184,10 +345,11 @@ class BotInstance implements IBotInstanceHandle {
 export function startBot(
   config: IBotConfig,
   logStore?: LogStore,
-  createMineflayerBot: typeof mineflayer.createBot = mineflayer.createBot
+  createMineflayerBot: typeof mineflayer.createBot = mineflayer.createBot,
+  authenticateMicrosoft: typeof defaultAuthenticateMicrosoft = defaultAuthenticateMicrosoft
 ): IBotInstanceHandle {
   const logger = createConsoleLogger(config.id, logStore).withCategory('connection')
-  return new BotInstance(config.id, config, logger, createMineflayerBot)
+  return new BotInstance(config.id, config, logger, createMineflayerBot, authenticateMicrosoft)
 }
 
 async function runInstance(
@@ -216,12 +378,15 @@ async function runInstance(
   let reconnectAttempts = 0
 
   async function connect(): Promise<void> {
+    let fatalError: Error | undefined
+
     const bot = createMineflayerBot({
       host: config.host,
       port: config.port,
       username: config.username,
       auth: config.auth,
       profilesFolder: config.profilesFolder,
+      ...MICROSOFT_AUTH_FLOW_OPTIONS,
 
       onMsaCode: (data) => {
         console.log('================================================')
@@ -253,11 +418,23 @@ async function runInstance(
       reconnectAttempts = 0
       instance.status = 'online'
       instance.connectedSince = Date.now()
+      // A successful login only proves a still-valid token for 'microsoft'
+      // auth; instance.authStatus is undefined for 'offline', so this is a
+      // no-op there.
+      if (instance.authStatus !== undefined) {
+        instance.authStatus = 'authenticated'
+        instance.minecraftProfileName = bot.username
+      }
       logger.info('TippyBot joined the server')
     })
 
     bot.on('error', (err) => {
       logger.error('Bot error', { err })
+      // Recorded, not acted on immediately: 'end' always follows 'error' for a
+      // failed connection attempt, and it's the single place that already
+      // decides the handle's next status -- duplicating that decision here
+      // would risk the two disagreeing.
+      if (isFatalConnectionError(err)) fatalError = err
     })
 
     bot.on('kicked', (reason, loggedIn) => {
@@ -287,6 +464,16 @@ async function runInstance(
         instance.status = 'disconnected'
         instance.ctx = undefined
         logger.info('Bot disconnected (requested)', { reason })
+        return
+      }
+
+      if (fatalError) {
+        instance.status = 'errored'
+        instance.lastError = { message: fatalError.message, at: Date.now() }
+        instance.ctx = undefined
+        logger.error('Bot connection failed with a non-retryable error; not scheduling a reconnect', {
+          err: fatalError
+        })
         return
       }
 

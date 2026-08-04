@@ -44,7 +44,8 @@ describe('loadBotInstances', () => {
           commandPrefix: '!',
           admins: ['playerone'],
           profilesFolder: './auth_cache/steve',
-          autoConnect: true
+          autoConnect: true,
+          msaCacheKey: 'SteveBot'
         }
       ])
     })
@@ -113,17 +114,52 @@ describe('loadBotInstances', () => {
     expect(() => loadBotInstances(configPath)).toThrow(/"id"/)
   })
 
-  it('throws on a missing host', async () => {
-    const { host, ...rest } = validInstance
+  it('loads a missing host/port as "unconfigured" instead of throwing', async () => {
+    const { host, port, ...rest } = validInstance
     await writeConfig({ instances: [rest] })
+
+    const configs = loadBotInstances(configPath)
+    expect(configs[0].host).toBeUndefined()
+    expect(configs[0].port).toBeUndefined()
+  })
+
+  it('defaults port to 25565 when host is given without one', async () => {
+    const { port, ...rest } = validInstance
+    await writeConfig({ instances: [rest] })
+
+    expect(loadBotInstances(configPath)[0].port).toBe(25565)
+  })
+
+  it('throws on a non-numeric port when one is given', async () => {
+    await writeConfig({ instances: [{ ...validInstance, port: '25565' }] })
+
+    expect(() => loadBotInstances(configPath)).toThrow(/"port"/)
+  })
+
+  it('throws on an empty host string (distinct from an absent host)', async () => {
+    await writeConfig({ instances: [{ ...validInstance, host: '' }] })
 
     expect(() => loadBotInstances(configPath)).toThrow(/"host"/)
   })
 
-  it('throws on a non-numeric port', async () => {
-    await writeConfig({ instances: [{ ...validInstance, port: '25565' }] })
+  it('defaults username to id for microsoft auth when omitted', async () => {
+    const { username, ...rest } = validInstance // validInstance is auth: 'microsoft'
+    await writeConfig({ instances: [rest] })
 
-    expect(() => loadBotInstances(configPath)).toThrow(/"port"/)
+    expect(loadBotInstances(configPath)[0].username).toBe('steve')
+  })
+
+  it('also defaults username to id for microsoft auth when given as an empty string', async () => {
+    await writeConfig({ instances: [{ ...validInstance, username: '' }] })
+
+    expect(loadBotInstances(configPath)[0].username).toBe('steve')
+  })
+
+  it('still requires username for offline auth', async () => {
+    const { username, ...rest } = validInstance
+    await writeConfig({ instances: [{ ...rest, auth: 'offline' }] })
+
+    expect(() => loadBotInstances(configPath)).toThrow(/"username"/)
   })
 
   it('throws on an invalid auth value', async () => {
@@ -198,8 +234,26 @@ describe('validateInstance', () => {
       commandPrefix: '!',
       admins: ['playerone'],
       profilesFolder: './auth_cache/steve',
-      autoConnect: true
+      autoConnect: true,
+      msaCacheKey: 'SteveBot'
     })
+  })
+
+  it('defaults msaCacheKey to the resolved username, so an existing instance keeps its exact prismarine-auth cache key', () => {
+    const config = validateInstance(validInstance, 'New bot instance')
+    expect(config.msaCacheKey).toBe(config.username)
+  })
+
+  it('respects an explicit msaCacheKey, independent of username', () => {
+    const config = validateInstance({ ...validInstance, msaCacheKey: 'stable-internal-id' }, 'New bot instance')
+    expect(config.msaCacheKey).toBe('stable-internal-id')
+    expect(config.username).toBe('SteveBot')
+  })
+
+  it('rejects an empty msaCacheKey', () => {
+    expect(() => validateInstance({ ...validInstance, msaCacheKey: '' }, 'New bot instance')).toThrow(
+      /"msaCacheKey"/
+    )
   })
 })
 

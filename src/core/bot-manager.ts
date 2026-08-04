@@ -201,6 +201,29 @@ export class BotManager {
     })
   }
 
+  /**
+   * Standalone Microsoft sign-in for one instance -- deliberately NOT routed
+   * through the CRUD queue above. authenticate() can take minutes (it waits
+   * on the user completing a device-code flow), and the CRUD queue is a
+   * strict FIFO with no cancellation: queuing this behind it would make an
+   * unrelated add/remove/update on a completely different instance wait out
+   * that whole window too. It's still fully race-safe against this same
+   * instance's own connect()/disconnect() -- both go through the instance's
+   * own per-instance queue (see bot.ts), which authenticate() also uses.
+   */
+  // async, not a direct passthrough: requireInstance() throws synchronously
+  // for an unknown id, and without `async` here that throw would escape as an
+  // exception instead of a rejected promise -- unlike the enqueueCrud-wrapped
+  // methods above, where .then() does that conversion automatically.
+  async authenticateInstance(id: string): Promise<void> {
+    return this.requireInstance(id).authenticate()
+  }
+
+  /** Also bypasses the CRUD queue, for the same reason -- and must, since it needs to interrupt authenticateInstance() rather than wait behind it. */
+  async cancelAuthentication(id: string): Promise<void> {
+    return this.requireInstance(id).cancelAuthentication()
+  }
+
   private requireInstance(id: string): IBotInstanceHandle {
     const handle = this.instances.get(id)
     if (!handle) throw new BotInstanceNotFoundError(id)

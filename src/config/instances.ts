@@ -97,14 +97,26 @@ export function validateInstance(entry: unknown, label: string): IBotConfig {
 
   const named = `${label} ("${id}")`
 
-  const host = requireString(raw.host, named, 'host')
-  const port = requireNumber(raw.port, named, 'port')
-  const username = requireString(raw.username, named, 'username')
+  // Both absent is a valid "unconfigured" instance -- see IBotConfig. `host`
+  // stays undefined until explicitly set; `port` defaults to 25565 whenever
+  // a host is given without one (matching the Minecraft default), but stays
+  // undefined alongside an absent host rather than saving a lone, meaningless
+  // port for an instance with nowhere to connect it to.
+  const host = raw.host !== undefined ? requireString(raw.host, named, 'host') : undefined
+  const port = raw.port !== undefined ? requireNumber(raw.port, named, 'port') : host !== undefined ? 25565 : undefined
 
   if (raw.auth !== 'microsoft' && raw.auth !== 'offline') {
     throw new Error(`${named}: "auth" must be "microsoft" or "offline".`)
   }
   const auth = raw.auth
+
+  // For 'offline' auth, username IS the bot's real in-game identity and stays
+  // required. For 'microsoft', it's only ever a technical placeholder (the
+  // real identity comes from the Microsoft login) -- the /bots UI doesn't ask
+  // for it at all, so an absent or empty value defaults to `id` instead of
+  // failing validation.
+  const usernameGiven = typeof raw.username === 'string' && raw.username.length > 0
+  const username = usernameGiven || auth !== 'microsoft' ? requireString(raw.username, named, 'username') : id
 
   const commandPrefix =
     typeof raw.commandPrefix === 'string' && raw.commandPrefix.length > 0 ? raw.commandPrefix : '!'
@@ -136,7 +148,17 @@ export function validateInstance(entry: unknown, label: string): IBotConfig {
   }
   const autoConnect = raw.autoConnect === undefined ? true : raw.autoConnect
 
-  return { id, host, port, username, auth, commandPrefix, admins, profilesFolder, autoConnect }
+  // Absent means "use the resolved username": every instance saved before
+  // this field existed was already using its username as prismarine-auth's
+  // cache key (see bot.ts's connect path), so defaulting to it here keeps
+  // that exact cache hash -- no forced re-authentication for existing
+  // instances.
+  if (raw.msaCacheKey !== undefined && (typeof raw.msaCacheKey !== 'string' || raw.msaCacheKey.length === 0)) {
+    throw new Error(`${named}: "msaCacheKey" must be a non-empty string.`)
+  }
+  const msaCacheKey = typeof raw.msaCacheKey === 'string' && raw.msaCacheKey.length > 0 ? raw.msaCacheKey : username
+
+  return { id, host, port, username, auth, commandPrefix, admins, profilesFolder, autoConnect, msaCacheKey }
 }
 
 function requireString(value: unknown, label: string, field: string): string {

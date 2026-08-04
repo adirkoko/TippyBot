@@ -6,7 +6,13 @@
 import type { Dimension } from 'mineflayer'
 import type { IBotConfig } from '../interfaces/config'
 import type { ActiveTaskInfo } from '../interfaces/tasks'
-import type { BotInstanceError, BotInstanceSnapshot, BotInstanceStatus } from '../interfaces/bot-instance'
+import type {
+  BotInstanceError,
+  BotInstanceSnapshot,
+  BotInstanceStatus,
+  MicrosoftAuthStatus,
+  MicrosoftDeviceCode
+} from '../interfaces/bot-instance'
 import { formatDimension } from '../utils/dimension'
 
 /** The handful of live mineflayer Bot fields the snapshot needs -- never the whole Bot type. */
@@ -27,10 +33,15 @@ export interface BuildSnapshotParams {
   /** Pass only while status is 'online' -- undefined otherwise, so stale/disconnected stats never leak into the snapshot. */
   bot: SnapshotBotSource | undefined
   activeTask: ActiveTaskInfo | undefined
+  authStatus: MicrosoftAuthStatus | undefined
+  authError: BotInstanceError | undefined
+  minecraftProfileName: string | undefined
+  deviceCode: MicrosoftDeviceCode | undefined
 }
 
 export function buildSnapshot(params: BuildSnapshotParams): BotInstanceSnapshot {
-  const { id, config, status, lastError, connectedSince, bot, activeTask } = params
+  const { id, config, status, lastError, connectedSince, bot, activeTask, authStatus, authError, minecraftProfileName, deviceCode } =
+    params
 
   return {
     id,
@@ -49,6 +60,11 @@ export function buildSnapshot(params: BuildSnapshotParams): BotInstanceSnapshot 
       ? { x: bot.entity.position.x, y: bot.entity.position.y, z: bot.entity.position.z }
       : undefined,
     dimension: bot?.game ? formatDimension(bot.game.dimension) : undefined,
-    activeTask
+    activeTask,
+
+    authStatus,
+    authError,
+    minecraftProfileName,
+    deviceCode
   }
 }
